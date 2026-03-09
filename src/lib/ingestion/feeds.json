@@ -1,0 +1,52 @@
+[
+  {
+    "name": "Ars Technica",
+    "feedUrl": "https://feeds.arstechnica.com/arstechnica/index",
+    "category": "general-tech"
+  },
+  {
+    "name": "The Verge",
+    "feedUrl": "https://www.theverge.com/rss/index.xml",
+    "category": "general-tech"
+  },
+  {
+    "name": "TechCrunch",
+    "feedUrl": "https://techcrunch.com/feed/",
+    "category": "startups-tech"
+  },
+  {
+    "name": "WIRED",
+    "feedUrl": "https://www.wired.com/feed/rss",
+    "category": "general-tech"
+  },
+  {
+    "name": "Engadget",
+    "feedUrl": "https://www.engadget.com/rss.xml",
+    "category": "consumer-tech"
+  },
+  {
+    "name": "ZDNET AI",
+    "feedUrl": "https://www.zdnet.com/topic/artificial-intelligence/rss.xml",
+    "category": "ai"
+  },
+  {
+    "name": "The Register",
+    "feedUrl": "https://www.theregister.com/headlines.atom",
+    "category": "infrastructure"
+  },
+  {
+    "name": "BleepingComputer",
+    "feedUrl": "https://www.bleepingcomputer.com/feed/",
+    "category": "security"
+  },
+  {
+    "name": "Slashdot",
+    "feedUrl": "https://rss.slashdot.org/Slashdot/slashdotMain",
+    "category": "developer-tech"
+  },
+  {
+    "name": "MIT Technology Review",
+    "feedUrl": "https://www.technologyreview.com/feed/",
+    "category": "research-tech"
+  }
+]
