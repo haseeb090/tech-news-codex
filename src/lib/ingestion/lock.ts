@@ -1,13 +1,22 @@
-let ingestRunning = false;
+import { randomUUID } from "node:crypto";
 
-export const acquireIngestLock = (): boolean => {
-  if (ingestRunning) return false;
-  ingestRunning = true;
-  return true;
+import { acquireAppLock, hasActiveAppLock, releaseAppLock, renewAppLock } from "@/lib/db";
+
+const INGEST_LOCK_NAME = "ingestion";
+const INGEST_LOCK_TTL_MS = 2 * 60 * 60 * 1000;
+
+export const createIngestLockOwner = (): string => randomUUID();
+
+export const acquireIngestLock = (ownerId: string): boolean => {
+  return acquireAppLock(INGEST_LOCK_NAME, ownerId, INGEST_LOCK_TTL_MS);
 };
 
-export const releaseIngestLock = (): void => {
-  ingestRunning = false;
+export const renewIngestLock = (ownerId: string): void => {
+  renewAppLock(INGEST_LOCK_NAME, ownerId, INGEST_LOCK_TTL_MS);
 };
 
-export const isIngestRunning = (): boolean => ingestRunning;
+export const releaseIngestLock = (ownerId: string): void => {
+  releaseAppLock(INGEST_LOCK_NAME, ownerId);
+};
+
+export const isIngestRunning = (): boolean => hasActiveAppLock(INGEST_LOCK_NAME);

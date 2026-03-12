@@ -34,4 +34,20 @@ describe("validateExtractionAgainstSource", () => {
 
     expect(result.ok).toBe(false);
   });
+
+  it("rejects article bodies that still contain obvious site boilerplate", () => {
+    const result = validateExtractionAgainstSource(
+      {
+        title: "OpenAI announced a new model for software engineering teams",
+        body:
+          "OpenAI announced a new model for software engineering teams. The release introduces improved code reasoning and faster tool calls for enterprise teams. Sign up for our newsletter today. Read our privacy policy before commenting. Jordan Lee explained the rollout details for enterprise users, including benchmarks, rollout timing, and reliability goals for production usage.",
+        writer: "Jordan Lee",
+        publishedAt: null,
+      },
+      sourceText,
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/boilerplate/i);
+  });
 });

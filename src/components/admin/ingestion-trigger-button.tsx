@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-export function IngestionTriggerButton() {
+export function IngestionTriggerButton({ onTriggered }: { onTriggered?: () => void }) {
   const [running, setRunning] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -15,12 +15,13 @@ export function IngestionTriggerButton() {
         method: "POST",
       });
 
-      const data = (await response.json()) as { error?: string; summary?: { succeeded: number; failed: number } };
+      const data = (await response.json()) as { error?: string; status?: string };
 
       if (!response.ok) {
         setMessage(data.error || "Failed to run ingestion");
       } else {
-        setMessage(`Ingestion complete. Success: ${data.summary?.succeeded ?? 0}, Failed: ${data.summary?.failed ?? 0}`);
+        setMessage("Ingestion started. The dashboard will update automatically.");
+        onTriggered?.();
       }
     } catch {
       setMessage("Request failed.");

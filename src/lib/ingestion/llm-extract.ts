@@ -29,6 +29,8 @@ Rules:
 - Do not invent information.
 - Use only facts present in the input.
 - Keep body as clean article text, not summary, minimum 280 characters.
+- Exclude navigation, newsletter prompts, ads, related links, footers, cookie banners, and comment sections.
+- Prefer the main article body only, preserving the original wording as much as possible.
 - If writer or published date is missing, return null.
 
 URL: ${params.url}

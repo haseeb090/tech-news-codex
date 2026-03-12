@@ -1,3 +1,5 @@
+import { closeDb } from "@/lib/db";
+import { acquireIngestLock, createIngestLockOwner, releaseIngestLock } from "@/lib/ingestion/lock";
 import { appConfig } from "@/lib/config";
 import { runIngestionPipeline } from "@/lib/ingestion/run-ingestion";
 
@@ -7,11 +9,20 @@ const runLoop = async () => {
   console.log(`[worker] starting with interval ${appConfig.workerIntervalMinutes} minutes`);
 
   while (true) {
+    const ownerId = createIngestLockOwner();
+
     try {
-      const summary = await runIngestionPipeline({ trigger: "scheduled" });
-      console.log("[worker] run complete", summary);
+      if (!acquireIngestLock(ownerId)) {
+        console.log("[worker] skipping because another ingestion is already running");
+      } else {
+        const summary = await runIngestionPipeline({ trigger: "scheduled", lockOwner: ownerId });
+        console.log("[worker] run complete", summary);
+      }
     } catch (error) {
       console.error("[worker] run failed", error);
+    } finally {
+      releaseIngestLock(ownerId);
+      closeDb();
     }
 
     await wait(appConfig.workerIntervalMinutes * 60 * 1000);

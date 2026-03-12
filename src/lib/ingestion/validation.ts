@@ -1,6 +1,17 @@
 import { tokenize } from "@/lib/url-utils";
 import type { ExtractedArticle } from "@/lib/types";
 
+const BOILERPLATE_PATTERNS = [
+  /privacy policy/i,
+  /all rights reserved/i,
+  /sign up/i,
+  /newsletter/i,
+  /community guidelines/i,
+  /cookie policy/i,
+  /show comments/i,
+  /follow us/i,
+];
+
 const normalize = (value: string): string => value.toLowerCase().replace(/\s+/g, " ").trim();
 
 const hasTokenOverlap = (candidate: string, source: string, minRatio: number): boolean => {
@@ -28,6 +39,16 @@ export const validateExtractionAgainstSource = (
 
   if (!extracted.body || extracted.body.length < 280) {
     return { ok: false, reason: "Body too short" };
+  }
+
+  const boilerplateHits = BOILERPLATE_PATTERNS.filter((pattern) => pattern.test(extracted.body)).length;
+  if (boilerplateHits >= 2) {
+    return { ok: false, reason: "Body still contains site boilerplate" };
+  }
+
+  const sentences = extracted.body.split(/(?<=[.!?])\s+/).filter(Boolean);
+  if (sentences.length < 4) {
+    return { ok: false, reason: "Body is not article-like enough" };
   }
 
   const normalizedTitle = normalize(extracted.title);

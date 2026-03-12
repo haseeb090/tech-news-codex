@@ -2,8 +2,7 @@ import { getServerSession } from "next-auth";
 import { NextRequest, NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth/options";
-import { runIngestionPipeline } from "@/lib/ingestion/run-ingestion";
-import { acquireIngestLock, isIngestRunning, releaseIngestLock } from "@/lib/ingestion/lock";
+import { startBackgroundIngestion } from "@/lib/ingestion/trigger-ingestion";
 import { checkRateLimit } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -24,25 +23,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Too many requests" }, { status: 429 });
   }
 
-  if (isIngestRunning()) {
-    return NextResponse.json({ error: "Ingestion already running" }, { status: 409 });
+  const result = startBackgroundIngestion("manual");
+  if (!result.ok) {
+    return NextResponse.json({ error: result.reason }, { status: 409 });
   }
 
-  if (!acquireIngestLock()) {
-    return NextResponse.json({ error: "Ingestion lock unavailable" }, { status: 409 });
-  }
-
-  try {
-    const summary = await runIngestionPipeline({ trigger: "manual" });
-    return NextResponse.json({ ok: true, summary });
-  } catch (error) {
-    return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : String(error),
-      },
-      { status: 500 },
-    );
-  } finally {
-    releaseIngestLock();
-  }
+  return NextResponse.json({ ok: true, status: "started" }, { status: 202 });
 }

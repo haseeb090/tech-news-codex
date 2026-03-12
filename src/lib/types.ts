@@ -48,6 +48,24 @@ export interface IngestionRunSummary {
   failed: number;
 }
 
+export interface IngestionRunRecord extends IngestionRunSummary {
+  status: "running" | "completed" | "failed";
+  currentItemUrl: string | null;
+  lastError: string | null;
+}
+
+export interface ArticleAttemptRecord {
+  id: number;
+  runId: number;
+  linkId: number;
+  articleUrl: string;
+  status: "success" | "failed";
+  errorMessage: string | null;
+  modelUsed: string | null;
+  durationMs: number;
+  createdAt: string;
+}
+
 export interface NewsQuery {
   q?: string;
   source?: string;

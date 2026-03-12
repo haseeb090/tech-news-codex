@@ -27,15 +27,21 @@ export function ArticleCard({ article }: ArticleCardProps) {
 
       <div className="mt-auto pt-6">
         <p className="text-sm text-slate-500">{article.writer ? `By ${article.writer}` : "Writer unavailable"}</p>
-        <Link
-          href={article.url}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-cyan-700 transition group-hover:gap-3"
-        >
-          Read source
-          <span aria-hidden>?</span>
-        </Link>
+        <div className="mt-3 flex items-center gap-4">
+          <Link href={`/articles/${article.id}`} className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900">
+            Read here
+            <span aria-hidden>{"->"}</span>
+          </Link>
+          <Link
+            href={article.url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 text-sm font-semibold text-cyan-700 transition group-hover:gap-3"
+          >
+            Source
+            <span aria-hidden>{"->"}</span>
+          </Link>
+        </div>
       </div>
     </article>
   );

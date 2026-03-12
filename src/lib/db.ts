@@ -2,7 +2,14 @@ import fs from "node:fs";
 import Database from "better-sqlite3";
 
 import { appConfig } from "@/lib/config";
-import type { ArticleRecord, ExtractedArticle, IngestionRunSummary, LinkRecord } from "@/lib/types";
+import type {
+  ArticleAttemptRecord,
+  ArticleRecord,
+  ExtractedArticle,
+  IngestionRunRecord,
+  IngestionRunSummary,
+  LinkRecord,
+} from "@/lib/types";
 
 let db: Database.Database | null = null;
 
@@ -36,6 +43,199 @@ const mapArticle = (row: Record<string, unknown>): ArticleRecord => ({
   updatedAt: String(row.updated_at),
 });
 
+const mapRun = (row: Record<string, unknown>): IngestionRunRecord => ({
+  runId: Number(row.id),
+  trigger: String(row.trigger) as IngestionRunSummary["trigger"],
+  startedAt: String(row.started_at),
+  finishedAt: (row.finished_at as string | null) || String(row.started_at),
+  totalLinks: Number(row.total_links),
+  newLinks: Number(row.new_links),
+  queuedForProcessing: Number(row.queued_for_processing),
+  processed: Number(row.processed),
+  succeeded: Number(row.succeeded),
+  failed: Number(row.failed),
+  status: (row.status as IngestionRunRecord["status"]) || "completed",
+  currentItemUrl: (row.current_item_url as string | null) || null,
+  lastError: (row.last_error as string | null) || null,
+});
+
+const mapAttempt = (row: Record<string, unknown>): ArticleAttemptRecord => ({
+  id: Number(row.id),
+  runId: Number(row.run_id),
+  linkId: Number(row.link_id),
+  articleUrl: String(row.article_url),
+  status: row.status as ArticleAttemptRecord["status"],
+  errorMessage: (row.error_message as string | null) || null,
+  modelUsed: (row.model_used as string | null) || null,
+  durationMs: Number(row.duration_ms),
+  createdAt: String(row.created_at),
+});
+
+const tableExists = (database: Database.Database, tableName: string): boolean => {
+  const row = database
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(tableName) as { name?: string } | undefined;
+  return Boolean(row?.name);
+};
+
+const hasColumn = (database: Database.Database, tableName: string, columnName: string): boolean => {
+  const rows = database.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+  return rows.some((row) => row.name === columnName);
+};
+
+const applyMigrations = (database: Database.Database): void => {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version INTEGER PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    );
+  `);
+
+  const applied = new Set(
+    (database.prepare("SELECT version FROM schema_migrations ORDER BY version ASC").all() as Array<{ version: number }>).map(
+      (row) => row.version,
+    ),
+  );
+
+  const markApplied = database.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)");
+
+  const runMigration = (version: number, fn: () => void) => {
+    if (applied.has(version)) return;
+    const tx = database.transaction(() => {
+      fn();
+      markApplied.run(version, nowIso());
+    });
+    tx();
+  };
+
+  runMigration(1, () => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS feeds (
+        url TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS article_links (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        feed_url TEXT NOT NULL,
+        original_url TEXT NOT NULL,
+        normalized_url TEXT NOT NULL UNIQUE,
+        source_domain TEXT NOT NULL,
+        status TEXT NOT NULL,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        article_id INTEGER,
+        last_error TEXT,
+        first_seen_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(feed_url) REFERENCES feeds(url)
+      );
+
+      CREATE TABLE IF NOT EXISTS articles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        link_id INTEGER NOT NULL UNIQUE,
+        canonical_url TEXT NOT NULL UNIQUE,
+        source_domain TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        writer TEXT,
+        published_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(link_id) REFERENCES article_links(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS ingest_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        trigger TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        total_links INTEGER NOT NULL DEFAULT 0,
+        new_links INTEGER NOT NULL DEFAULT 0,
+        queued_for_processing INTEGER NOT NULL DEFAULT 0,
+        processed INTEGER NOT NULL DEFAULT 0,
+        succeeded INTEGER NOT NULL DEFAULT 0,
+        failed INTEGER NOT NULL DEFAULT 0
+      );
+
+      CREATE TABLE IF NOT EXISTS article_attempts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL,
+        link_id INTEGER NOT NULL,
+        article_url TEXT NOT NULL,
+        status TEXT NOT NULL,
+        error_message TEXT,
+        model_used TEXT,
+        duration_ms INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(run_id) REFERENCES ingest_runs(id),
+        FOREIGN KEY(link_id) REFERENCES article_links(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_article_links_status ON article_links(status);
+      CREATE INDEX IF NOT EXISTS idx_article_links_retry ON article_links(next_retry_at);
+      CREATE INDEX IF NOT EXISTS idx_articles_created ON articles(created_at);
+    `);
+  });
+
+  runMigration(2, () => {
+    if (!hasColumn(database, "ingest_runs", "status")) {
+      database.exec("ALTER TABLE ingest_runs ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'");
+    }
+    if (!hasColumn(database, "ingest_runs", "current_item_url")) {
+      database.exec("ALTER TABLE ingest_runs ADD COLUMN current_item_url TEXT");
+    }
+    if (!hasColumn(database, "ingest_runs", "last_error")) {
+      database.exec("ALTER TABLE ingest_runs ADD COLUMN last_error TEXT");
+    }
+  });
+
+  runMigration(3, () => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS app_locks (
+        name TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS rate_limits (
+        key TEXT PRIMARY KEY,
+        count INTEGER NOT NULL,
+        reset_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS login_audit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL,
+        success INTEGER NOT NULL,
+        reason TEXT,
+        ip_address TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_ingest_runs_status ON ingest_runs(status, started_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_attempts_run_created ON article_attempts(run_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_rate_limits_reset ON rate_limits(reset_at);
+      CREATE INDEX IF NOT EXISTS idx_login_audit_created ON login_audit(created_at DESC);
+    `);
+  });
+
+  if (!tableExists(database, "app_locks")) {
+    database.exec(`
+      CREATE TABLE app_locks (
+        name TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+  }
+};
+
 const ensureInitialized = (): Database.Database => {
   if (db) return db;
 
@@ -43,81 +243,18 @@ const ensureInitialized = (): Database.Database => {
 
   db = new Database(appConfig.dbPath);
   db.pragma("journal_mode = WAL");
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS feeds (
-      url TEXT PRIMARY KEY,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS article_links (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      feed_url TEXT NOT NULL,
-      original_url TEXT NOT NULL,
-      normalized_url TEXT NOT NULL UNIQUE,
-      source_domain TEXT NOT NULL,
-      status TEXT NOT NULL,
-      retry_count INTEGER NOT NULL DEFAULT 0,
-      next_retry_at TEXT,
-      article_id INTEGER,
-      last_error TEXT,
-      first_seen_at TEXT NOT NULL,
-      last_seen_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      FOREIGN KEY(feed_url) REFERENCES feeds(url)
-    );
-
-    CREATE TABLE IF NOT EXISTS articles (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      link_id INTEGER NOT NULL UNIQUE,
-      canonical_url TEXT NOT NULL UNIQUE,
-      source_domain TEXT NOT NULL,
-      title TEXT NOT NULL,
-      body TEXT NOT NULL,
-      writer TEXT,
-      published_at TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      FOREIGN KEY(link_id) REFERENCES article_links(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS ingest_runs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      trigger TEXT NOT NULL,
-      started_at TEXT NOT NULL,
-      finished_at TEXT,
-      total_links INTEGER NOT NULL,
-      new_links INTEGER NOT NULL,
-      queued_for_processing INTEGER NOT NULL,
-      processed INTEGER NOT NULL DEFAULT 0,
-      succeeded INTEGER NOT NULL DEFAULT 0,
-      failed INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS article_attempts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      run_id INTEGER NOT NULL,
-      link_id INTEGER NOT NULL,
-      article_url TEXT NOT NULL,
-      status TEXT NOT NULL,
-      error_message TEXT,
-      model_used TEXT,
-      duration_ms INTEGER NOT NULL,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY(run_id) REFERENCES ingest_runs(id),
-      FOREIGN KEY(link_id) REFERENCES article_links(id)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_article_links_status ON article_links(status);
-    CREATE INDEX IF NOT EXISTS idx_article_links_retry ON article_links(next_retry_at);
-    CREATE INDEX IF NOT EXISTS idx_articles_created ON articles(created_at);
-  `);
+  applyMigrations(db);
 
   return db;
 };
 
 export const getDb = (): Database.Database => ensureInitialized();
+
+export const closeDb = (): void => {
+  if (!db) return;
+  db.close();
+  db = null;
+};
 
 export const registerFeedIfMissing = (feedUrl: string): void => {
   const database = ensureInitialized();
@@ -205,22 +342,67 @@ export const isLinkEligibleForProcessing = (link: LinkRecord): boolean => {
 
 export const startIngestRun = (
   trigger: IngestionRunSummary["trigger"],
-  totalLinks: number,
-  newLinks: number,
-  queuedForProcessing: number,
+  totalLinks = 0,
+  newLinks = 0,
+  queuedForProcessing = 0,
 ): number => {
   const database = ensureInitialized();
 
   const result = database
     .prepare(
       `
-      INSERT INTO ingest_runs (trigger, started_at, total_links, new_links, queued_for_processing)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO ingest_runs (
+        trigger,
+        started_at,
+        total_links,
+        new_links,
+        queued_for_processing,
+        status
+      )
+      VALUES (?, ?, ?, ?, ?, 'running')
       `,
     )
     .run(trigger, nowIso(), totalLinks, newLinks, queuedForProcessing);
 
   return Number(result.lastInsertRowid);
+};
+
+export const updateIngestRunDiscovery = (
+  runId: number,
+  details: { totalLinks: number; newLinks: number; queuedForProcessing: number },
+): void => {
+  const database = ensureInitialized();
+  database
+    .prepare(
+      `
+      UPDATE ingest_runs
+      SET total_links = ?,
+          new_links = ?,
+          queued_for_processing = ?
+      WHERE id = ?
+      `,
+    )
+    .run(details.totalLinks, details.newLinks, details.queuedForProcessing, runId);
+};
+
+export const updateIngestRunProgress = (
+  runId: number,
+  progress: { processed: number; succeeded: number; failed: number; currentItemUrl?: string | null },
+): void => {
+  const database = ensureInitialized();
+  database
+    .prepare(
+      `
+      UPDATE ingest_runs
+      SET processed = ?,
+          succeeded = ?,
+          failed = ?,
+          current_item_url = ?,
+          last_error = CASE WHEN ? IS NULL THEN last_error ELSE NULL END
+      WHERE id = ?
+      `,
+    )
+    .run(progress.processed, progress.succeeded, progress.failed, progress.currentItemUrl || null, progress.currentItemUrl || null, runId);
 };
 
 export const finalizeIngestRun = (summary: IngestionRunSummary): void => {
@@ -233,11 +415,30 @@ export const finalizeIngestRun = (summary: IngestionRunSummary): void => {
       SET finished_at = ?,
           processed = ?,
           succeeded = ?,
-          failed = ?
+          failed = ?,
+          status = 'completed',
+          current_item_url = NULL
       WHERE id = ?
       `,
     )
     .run(summary.finishedAt, summary.processed, summary.succeeded, summary.failed, summary.runId);
+};
+
+export const failIngestRun = (runId: number, errorMessage: string): void => {
+  const database = ensureInitialized();
+
+  database
+    .prepare(
+      `
+      UPDATE ingest_runs
+      SET finished_at = ?,
+          status = 'failed',
+          current_item_url = NULL,
+          last_error = ?
+      WHERE id = ?
+      `,
+    )
+    .run(nowIso(), errorMessage.slice(0, 1000), runId);
 };
 
 export const recordAttempt = (params: {
@@ -427,6 +628,12 @@ export const getLatestArticles = (limit: number): ArticleRecord[] => {
   return rows.map(mapArticle);
 };
 
+export const getArticleById = (id: number): ArticleRecord | null => {
+  const database = ensureInitialized();
+  const row = database.prepare("SELECT * FROM articles WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+  return row ? mapArticle(row) : null;
+};
+
 export const getDistinctSources = (): string[] => {
   const database = ensureInitialized();
   const rows = database
@@ -436,26 +643,22 @@ export const getDistinctSources = (): string[] => {
   return rows.map((row) => row.source_domain);
 };
 
-export const getLastRun = (): IngestionRunSummary | null => {
+export const getLastRun = (): IngestionRunRecord | null => {
   const database = ensureInitialized();
   const row = database
     .prepare("SELECT * FROM ingest_runs ORDER BY id DESC LIMIT 1")
     .get() as Record<string, unknown> | undefined;
 
-  if (!row) return null;
+  return row ? mapRun(row) : null;
+};
 
-  return {
-    runId: Number(row.id),
-    trigger: String(row.trigger) as IngestionRunSummary["trigger"],
-    startedAt: String(row.started_at),
-    finishedAt: (row.finished_at as string) || String(row.started_at),
-    totalLinks: Number(row.total_links),
-    newLinks: Number(row.new_links),
-    queuedForProcessing: Number(row.queued_for_processing),
-    processed: Number(row.processed),
-    succeeded: Number(row.succeeded),
-    failed: Number(row.failed),
-  };
+export const getActiveRun = (): IngestionRunRecord | null => {
+  const database = ensureInitialized();
+  const row = database
+    .prepare("SELECT * FROM ingest_runs WHERE status = 'running' ORDER BY id DESC LIMIT 1")
+    .get() as Record<string, unknown> | undefined;
+
+  return row ? mapRun(row) : null;
 };
 
 export const getFailedLinks = (limit = 25): LinkRecord[] => {
@@ -472,4 +675,148 @@ export const getFailedLinks = (limit = 25): LinkRecord[] => {
     .all(limit) as Record<string, unknown>[];
 
   return rows.map(mapLink);
+};
+
+export const getRecentAttempts = (limit = 25): ArticleAttemptRecord[] => {
+  const database = ensureInitialized();
+  const rows = database
+    .prepare(
+      `
+      SELECT *
+      FROM article_attempts
+      ORDER BY created_at DESC
+      LIMIT ?
+      `,
+    )
+    .all(limit) as Record<string, unknown>[];
+
+  return rows.map(mapAttempt);
+};
+
+export const acquireAppLock = (name: string, ownerId: string, ttlMs: number): boolean => {
+  const database = ensureInitialized();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + ttlMs).toISOString();
+
+  const tx = database.transaction(() => {
+    database.prepare("DELETE FROM app_locks WHERE expires_at <= ?").run(now.toISOString());
+
+    const existing = database.prepare("SELECT owner_id FROM app_locks WHERE name = ?").get(name) as
+      | { owner_id: string }
+      | undefined;
+
+    if (existing && existing.owner_id !== ownerId) {
+      return false;
+    }
+
+    database
+      .prepare(
+        `
+        INSERT INTO app_locks (name, owner_id, expires_at, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(name) DO UPDATE SET
+          owner_id = excluded.owner_id,
+          expires_at = excluded.expires_at,
+          updated_at = excluded.updated_at
+        `,
+      )
+      .run(name, ownerId, expiresAt, now.toISOString());
+
+    return true;
+  });
+
+  return tx();
+};
+
+export const renewAppLock = (name: string, ownerId: string, ttlMs: number): void => {
+  const database = ensureInitialized();
+  const now = new Date();
+  database
+    .prepare(
+      `
+      UPDATE app_locks
+      SET expires_at = ?,
+          updated_at = ?
+      WHERE name = ?
+        AND owner_id = ?
+      `,
+    )
+    .run(new Date(now.getTime() + ttlMs).toISOString(), now.toISOString(), name, ownerId);
+};
+
+export const releaseAppLock = (name: string, ownerId: string): void => {
+  const database = ensureInitialized();
+  database.prepare("DELETE FROM app_locks WHERE name = ? AND owner_id = ?").run(name, ownerId);
+};
+
+export const hasActiveAppLock = (name: string): boolean => {
+  const database = ensureInitialized();
+  const row = database
+    .prepare("SELECT name FROM app_locks WHERE name = ? AND expires_at > ?")
+    .get(name, nowIso()) as { name?: string } | undefined;
+  return Boolean(row?.name);
+};
+
+export const checkRateLimit = (
+  key: string,
+  limit: number,
+  windowMs: number,
+): { allowed: boolean; remaining: number; resetAt: number } => {
+  const database = ensureInitialized();
+  const now = Date.now();
+  const nowText = new Date(now).toISOString();
+
+  const tx = database.transaction(() => {
+    const row = database
+      .prepare("SELECT count, reset_at FROM rate_limits WHERE key = ?")
+      .get(key) as { count: number; reset_at: string } | undefined;
+
+    if (!row || new Date(row.reset_at).getTime() <= now) {
+      const resetAt = now + windowMs;
+      database
+        .prepare(
+          `
+          INSERT INTO rate_limits (key, count, reset_at, updated_at)
+          VALUES (?, 1, ?, ?)
+          ON CONFLICT(key) DO UPDATE SET
+            count = excluded.count,
+            reset_at = excluded.reset_at,
+            updated_at = excluded.updated_at
+          `,
+        )
+        .run(key, new Date(resetAt).toISOString(), nowText);
+      return { allowed: true, remaining: Math.max(0, limit - 1), resetAt };
+    }
+
+    if (row.count >= limit) {
+      return { allowed: false, remaining: 0, resetAt: new Date(row.reset_at).getTime() };
+    }
+
+    const nextCount = row.count + 1;
+    database.prepare("UPDATE rate_limits SET count = ?, updated_at = ? WHERE key = ?").run(nextCount, nowText, key);
+    return {
+      allowed: true,
+      remaining: Math.max(0, limit - nextCount),
+      resetAt: new Date(row.reset_at).getTime(),
+    };
+  });
+
+  return tx();
+};
+
+export const recordLoginAudit = (params: {
+  username: string;
+  success: boolean;
+  reason?: string;
+  ipAddress?: string | null;
+}): void => {
+  const database = ensureInitialized();
+  database
+    .prepare(
+      `
+      INSERT INTO login_audit (username, success, reason, ip_address, created_at)
+      VALUES (?, ?, ?, ?, ?)
+      `,
+    )
+    .run(params.username, params.success ? 1 : 0, params.reason || null, params.ipAddress || null, nowIso());
 };
