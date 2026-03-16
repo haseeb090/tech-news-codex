@@ -2,6 +2,7 @@ import { ChatOllama } from "@langchain/ollama";
 import { z } from "zod";
 
 import { appConfig } from "@/lib/config";
+import { normalizeHtmlForExtraction } from "@/lib/ingestion/deterministic-extract";
 import type { ExtractedArticle } from "@/lib/types";
 
 const extractionSchema = z.object({
@@ -20,11 +21,18 @@ const llm = new ChatOllama({
 export const llmExtractArticle = async (params: {
   url: string;
   html: string;
+  sourceText?: string;
   fallbackTitle: string;
+  processingTimeoutMs?: number;
+  htmlMaxChars?: number;
 }): Promise<ExtractedArticle> => {
   const structured = llm.withStructuredOutput(extractionSchema);
+  const promptSource = (params.sourceText?.trim() || normalizeHtmlForExtraction(params.html)).slice(
+    0,
+    params.htmlMaxChars ?? appConfig.llmHtmlMaxChars,
+  );
 
-  const prompt = `You extract factual fields from raw article HTML.
+  const prompt = `You extract factual article fields from source content taken from a news page.
 Rules:
 - Do not invent information.
 - Use only facts present in the input.
@@ -36,10 +44,12 @@ Rules:
 URL: ${params.url}
 Fallback title: ${params.fallbackTitle}
 
-HTML (possibly truncated):
-${params.html.slice(0, 45_000)}`;
+Source content (possibly truncated):
+${promptSource}`;
 
-  const result = await structured.invoke(prompt);
+  const result = await structured.invoke(prompt, {
+    signal: AbortSignal.timeout(params.processingTimeoutMs ?? appConfig.articleProcessTimeoutMs),
+  });
 
   return {
     title: result.title,

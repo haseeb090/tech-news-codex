@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { IngestionTriggerButton } from "@/components/admin/ingestion-trigger-button";
+import { classifyFailure } from "@/lib/ingestion/failure-classification";
 import type { ArticleAttemptRecord, IngestionRunRecord, LinkRecord } from "@/lib/types";
 
 interface AdminDashboardData {
@@ -21,6 +22,11 @@ const fmt = (value: string | null | undefined): string => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+};
+
+const classificationClasses: Record<ReturnType<typeof classifyFailure>, string> = {
+  transient: "border-amber-200 bg-amber-50 text-amber-700",
+  terminal: "border-rose-200 bg-rose-50 text-rose-700",
 };
 
 export function AdminDashboardClient({ initialData }: AdminDashboardClientProps) {
@@ -218,8 +224,11 @@ export function AdminDashboardClient({ initialData }: AdminDashboardClientProps)
                 </tr>
               </thead>
               <tbody>
-                {data.failedLinks.map((link) => (
-                  <tr key={link.id} className="border-b border-slate-100 align-top">
+                {data.failedLinks.map((link) => {
+                  const classification = classifyFailure(link.lastError || "");
+
+                  return (
+                    <tr key={link.id} className="border-b border-slate-100 align-top">
                     <td className="py-2 pr-4">{link.sourceDomain}</td>
                     <td className="py-2 pr-4 text-sky-700">
                       <a href={link.normalizedUrl} target="_blank" rel="noreferrer" className="line-clamp-2 hover:underline">
@@ -228,9 +237,19 @@ export function AdminDashboardClient({ initialData }: AdminDashboardClientProps)
                     </td>
                     <td className="py-2 pr-4">{link.retryCount}</td>
                     <td className="py-2 pr-4">{fmt(link.nextRetryAt)}</td>
-                    <td className="py-2 text-rose-700">{link.lastError || "Unknown"}</td>
-                  </tr>
-                ))}
+                    <td className="py-2">
+                      <div className="space-y-2">
+                        <span
+                          className={`inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${classificationClasses[classification]}`}
+                        >
+                          {classification}
+                        </span>
+                        <p className="text-rose-700">{link.lastError || "Unknown"}</p>
+                      </div>
+                    </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

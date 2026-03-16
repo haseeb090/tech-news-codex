@@ -4,7 +4,7 @@ import { runIngestionPipeline } from "@/lib/ingestion/run-ingestion";
 
 const run = async () => {
   const ownerId = createIngestLockOwner();
-  if (!acquireIngestLock(ownerId)) {
+  if (!(await acquireIngestLock(ownerId))) {
     throw new Error("Ingestion already running");
   }
 
@@ -12,8 +12,8 @@ const run = async () => {
     const summary = await runIngestionPipeline({ trigger: "scheduled", lockOwner: ownerId });
     console.log(JSON.stringify(summary, null, 2));
   } finally {
-    releaseIngestLock(ownerId);
-    closeDb();
+    await releaseIngestLock(ownerId);
+    await closeDb();
   }
 
   process.exit(0);

@@ -9,7 +9,11 @@ if (!password) {
 
 hash(password)
   .then((hashed) => {
+    const escaped = hashed.replace(/\$/g, "\\$");
+    console.log("Raw hash:");
     console.log(hashed);
+    console.log("\n.env.local-safe value:");
+    console.log(`ADMIN_PASSWORD_HASH=${escaped}`);
   })
   .catch((error) => {
     console.error(error);

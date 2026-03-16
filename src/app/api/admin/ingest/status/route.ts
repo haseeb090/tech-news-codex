@@ -18,11 +18,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const rate = checkRateLimit(resolveKey(request, session.user.email || "admin"), 120, 60_000);
+  const rate = await checkRateLimit(resolveKey(request, session.user.email || "admin"), 120, 60_000);
   if (!rate.allowed) {
     return NextResponse.json({ error: "Too many requests" }, { status: 429 });
   }
 
-  const data = getAdminDashboardData();
+  const data = await getAdminDashboardData();
   return NextResponse.json(data);
 }

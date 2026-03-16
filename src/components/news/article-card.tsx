@@ -15,7 +15,7 @@ const formatDate = (value: string): string => {
 
 export function ArticleCard({ article }: ArticleCardProps) {
   return (
-    <article className="group flex h-full flex-col rounded-3xl border border-slate-200/70 bg-white/90 p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-xl">
+    <article className="group flex h-full flex-col rounded-3xl border border-fuchsia-200/50 bg-white/95 p-6 shadow-[0_22px_60px_rgba(15,23,42,0.22)] transition hover:-translate-y-1 hover:shadow-[0_26px_70px_rgba(217,70,239,0.18)]">
       <div className="mb-4 flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
         <span>{article.source}</span>
         <span>{formatDate(article.publishedAt || article.createdAt)}</span>

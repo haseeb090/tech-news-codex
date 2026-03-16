@@ -13,7 +13,7 @@ export default async function AdminPage() {
     redirect("/login");
   }
 
-  const data = getAdminDashboardData();
+  const data = await getAdminDashboardData();
 
   return (
     <main className="space-y-8">

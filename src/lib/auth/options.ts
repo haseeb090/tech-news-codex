@@ -43,9 +43,9 @@ export const authOptions: NextAuthOptions = {
         const username = credentials?.username?.trim() || "";
         const ipAddress = resolveIp(request);
 
-        const rate = checkRateLimit(`login:${username.toLowerCase() || "unknown"}:${ipAddress || "unknown"}`, 5, 15 * 60_000);
+        const rate = await checkRateLimit(`login:${username.toLowerCase() || "unknown"}:${ipAddress || "unknown"}`, 5, 15 * 60_000);
         if (!rate.allowed) {
-          recordLoginAudit({
+          await recordLoginAudit({
             username: username || "unknown",
             success: false,
             reason: "rate_limited",
@@ -55,7 +55,7 @@ export const authOptions: NextAuthOptions = {
         }
 
         if (!credentials?.username || !credentials.password) {
-          recordLoginAudit({
+          await recordLoginAudit({
             username: username || "unknown",
             success: false,
             reason: "missing_credentials",
@@ -65,7 +65,7 @@ export const authOptions: NextAuthOptions = {
         }
 
         if (credentials.username !== appConfig.adminUsername || !appConfig.adminPasswordHash) {
-          recordLoginAudit({
+          await recordLoginAudit({
             username: username,
             success: false,
             reason: "invalid_username",
@@ -76,7 +76,7 @@ export const authOptions: NextAuthOptions = {
 
         const valid = await verify(appConfig.adminPasswordHash, credentials.password);
         if (!valid) {
-          recordLoginAudit({
+          await recordLoginAudit({
             username,
             success: false,
             reason: "invalid_password",
@@ -85,7 +85,7 @@ export const authOptions: NextAuthOptions = {
           return null;
         }
 
-        recordLoginAudit({
+        await recordLoginAudit({
           username,
           success: true,
           reason: "authorized",

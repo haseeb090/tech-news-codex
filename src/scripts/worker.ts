@@ -12,7 +12,7 @@ const runLoop = async () => {
     const ownerId = createIngestLockOwner();
 
     try {
-      if (!acquireIngestLock(ownerId)) {
+      if (!(await acquireIngestLock(ownerId))) {
         console.log("[worker] skipping because another ingestion is already running");
       } else {
         const summary = await runIngestionPipeline({ trigger: "scheduled", lockOwner: ownerId });
@@ -21,8 +21,8 @@ const runLoop = async () => {
     } catch (error) {
       console.error("[worker] run failed", error);
     } finally {
-      releaseIngestLock(ownerId);
-      closeDb();
+      await releaseIngestLock(ownerId);
+      await closeDb();
     }
 
     await wait(appConfig.workerIntervalMinutes * 60 * 1000);

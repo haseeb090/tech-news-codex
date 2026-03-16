@@ -30,13 +30,13 @@ export default function RootLayout({
       <body className={`${spaceGrotesk.variable} ${sourceSerif.variable} antialiased`}>
         <AuthProvider>
           <div className="mx-auto min-h-screen max-w-[1400px] px-4 pb-16 pt-6 md:px-10">
-            <header className="mb-10 flex items-center justify-between rounded-2xl border border-slate-200/70 bg-white/80 px-5 py-3 shadow-sm backdrop-blur">
-              <Link href="/" className="font-sans text-lg font-bold tracking-wide text-slate-900">
+            <header className="mb-10 flex items-center justify-between rounded-[1.8rem] border border-fuchsia-300/15 bg-slate-950/60 px-5 py-3 shadow-[0_18px_60px_rgba(15,23,42,0.45)] backdrop-blur-xl">
+              <Link href="/" className="font-sans text-lg font-bold tracking-[0.04em] text-white">
                 Tech Radar News
               </Link>
-              <nav className="flex items-center gap-5 text-sm font-semibold text-slate-700">
-                <Link href="/">Feed</Link>
-                <Link href="/admin">Admin</Link>
+              <nav className="flex items-center gap-5 text-sm font-semibold text-slate-300">
+                <Link href="/" className="hover:text-cyan-300">Feed</Link>
+                <Link href="/admin" className="hover:text-fuchsia-300">Admin</Link>
               </nav>
             </header>
             {children}

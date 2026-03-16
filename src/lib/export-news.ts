@@ -7,7 +7,7 @@ import { appConfig } from "@/lib/config";
 import { getLatestArticles } from "@/lib/db";
 
 export const exportNewsArtifacts = async (): Promise<void> => {
-  const articles = getLatestArticles(appConfig.maxArticlesInExport);
+  const articles = await getLatestArticles(appConfig.maxArticlesInExport);
 
   await fs.mkdir(path.dirname(appConfig.csvExportPath), { recursive: true });
   await fs.mkdir(path.dirname(appConfig.jsonExportPath), { recursive: true });

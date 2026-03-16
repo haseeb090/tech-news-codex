@@ -62,6 +62,7 @@ export interface ArticleAttemptRecord {
   status: "success" | "failed";
   errorMessage: string | null;
   modelUsed: string | null;
+  agentOutput: Record<string, unknown> | null;
   durationMs: number;
   createdAt: string;
 }

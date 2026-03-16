@@ -1,11 +1,11 @@
 # Tech Radar News
 
-Next.js monolith that ingests tech news from RSS feeds, extracts full article content with a LangGraph workflow + Ollama fallback, stores canonical state in local SQLite, and exports trimmed artifacts for Vercel frontend display.
+Next.js monolith that ingests tech news from RSS feeds, extracts full article content with a LangGraph workflow + Ollama fallback, stores canonical state in Turso/libSQL, and exports trimmed artifacts for Vercel frontend display.
 
 ## Stack
 - Next.js (App Router, TypeScript, Tailwind)
 - Auth: NextAuth Credentials (admin-only controls)
-- Local DB: SQLite (`data/news.db`)
+- Canonical DB: Turso / libSQL via Drizzle
 - Orchestration: `@langchain/langgraph`
 - LLM fallback: Ollama (`qwen3:8b` by default)
 - Export artifacts: `public/news-latest.json` + `data/news-latest.csv`
@@ -31,7 +31,16 @@ Next.js monolith that ingests tech news from RSS feeds, extracts full article co
    npm run admin:hash -- your-strong-password
    ```
 4. Put hash in `.env.local` as `ADMIN_PASSWORD_HASH`.
-5. Ensure Ollama is running and model exists:
+5. Set Turso credentials in `.env.local`:
+   ```bash
+   DATABASE_URL=libsql://your-db-name.turso.io
+   DATABASE_AUTH_TOKEN=your-turso-auth-token
+   ```
+6. Push schema to Turso:
+   ```bash
+   npm run db:push -- --force
+   ```
+7. Ensure Ollama is running and model exists:
    ```bash
    ollama list
    ```
@@ -41,8 +50,10 @@ Next.js monolith that ingests tech news from RSS feeds, extracts full article co
 - `npm run dev:with-ingest`: ingest once, then start frontend.
 - `npm run ingest`: one ingestion run (recommended for scheduler).
 - `npm run worker`: continuous local loop every 60 mins (optional).
-- `npm run export:news`: rebuild JSON/CSV from SQLite.
+- `npm run export:news`: rebuild JSON/CSV from Turso-backed articles.
 - `npm run feeds:check`: validate curated feeds are reachable and first article is HTML.
+- `npm run db:generate`: generate Drizzle migration SQL.
+- `npm run db:push`: push schema to Turso/libSQL.
 - `npm run lint`: lint checks.
 - `npm run test`: unit tests.
 
@@ -59,11 +70,28 @@ Next.js monolith that ingests tech news from RSS feeds, extracts full article co
 5. Add arguments: `run ingest`
 6. Start in: `e:\Code\Codex-projects\nextjs tech news`
 
-## Vercel flow
-- Vercel reads `public/news-latest.json` for rendering.
-- Hourly local ingestion updates SQLite + exports artifacts.
-- Commit and push updated artifacts when you want Vercel to display latest data.
+## Turso + Vercel deploy
+1. Create a Turso database and auth token.
+2. Add these env vars in Vercel:
+   ```bash
+   DATABASE_URL=libsql://your-db-name.turso.io
+   DATABASE_AUTH_TOKEN=your-turso-auth-token
+   NEXTAUTH_SECRET=replace-with-random-long-secret
+   NEXTAUTH_URL=https://your-vercel-domain.vercel.app
+   ADMIN_USERNAME=admin
+   ADMIN_PASSWORD_HASH=your-argon2-hash
+   OLLAMA_BASE_URL=http://your-pc-or-private-endpoint:11434
+   OLLAMA_MODEL=qwen3:8b
+   ```
+3. Push the schema once from your local machine:
+   ```bash
+   npm run db:push -- --force
+   ```
+4. Deploy to Vercel.
+5. Run ingestion from your PC with `npm run ingest` or `npm run worker`.
+6. If you want to trigger ingestion from the hosted admin UI, `OLLAMA_BASE_URL` must point to a production-reachable Ollama endpoint. If it still points to `127.0.0.1`, use the local CLI ingestion flow instead.
 
 ## Notes
-- SQLite remains local canonical state for dedupe/retries/history.
-- JSON/CSV artifacts are trimmed to latest 100 articles for lightweight deploys.
+- Turso is the canonical store for dedupe, retries, run history, and extracted article bodies.
+- Exported JSON/CSV artifacts remain trimmed to the latest 100 articles for lightweight frontend reads.
+- Slow sources use adaptive timeouts and smarter retry handling so transient failures do not stall the whole ingestion run.

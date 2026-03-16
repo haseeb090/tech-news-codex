@@ -52,7 +52,7 @@ export const validateExtractionAgainstSource = (
   }
 
   const normalizedTitle = normalize(extracted.title);
-  const titleSupported = normalizedSource.includes(normalizedTitle) || hasTokenOverlap(extracted.title, sourceText, 0.6);
+  const titleSupported = normalizedSource.includes(normalizedTitle) || hasTokenOverlap(extracted.title, sourceText, 0.5);
   if (!titleSupported) {
     return { ok: false, reason: "Title not supported by source text" };
   }

@@ -2,6 +2,7 @@ import pLimit from "p-limit";
 
 import { appConfig } from "@/lib/config";
 import {
+  failStaleIngestRuns,
   failIngestRun,
   finalizeIngestRun,
   getLinksByIds,
@@ -32,7 +33,8 @@ export const runIngestionPipeline = async (
   options: IngestionOptions,
 ): Promise<IngestionRunSummary> => {
   logInfo("Starting ingestion run", { trigger: options.trigger });
-  const runId = startIngestRun(options.trigger, 0, 0, 0);
+  await failStaleIngestRuns("Recovered from an interrupted ingestion run.");
+  const runId = await startIngestRun(options.trigger, 0, 0, 0);
   const runStartedAt = new Date().toISOString();
 
   try {
@@ -41,8 +43,8 @@ export const runIngestionPipeline = async (
     let newLinks = 0;
 
     for (const feedUrl of appConfig.rssFeeds) {
-      registerFeedIfMissing(feedUrl);
-      if (options.lockOwner) renewIngestLock(options.lockOwner);
+      await registerFeedIfMissing(feedUrl);
+      if (options.lockOwner) await renewIngestLock(options.lockOwner);
 
       try {
         const items = await fetchFeedLinks(feedUrl);
@@ -52,7 +54,7 @@ export const runIngestionPipeline = async (
           try {
             const normalizedUrl = normalizeUrl(item.link);
             const sourceDomain = getSourceDomain(normalizedUrl);
-            const { link, isNew } = upsertDiscoveredLink(
+            const { link, isNew } = await upsertDiscoveredLink(
               item.feedUrl,
               item.link,
               normalizedUrl,
@@ -79,21 +81,27 @@ export const runIngestionPipeline = async (
     }
 
     const queuedIds = [...linkIdsToProcess];
-    updateIngestRunDiscovery(runId, {
+    await updateIngestRunDiscovery(runId, {
       totalLinks: totalDiscovered,
       newLinks,
       queuedForProcessing: queuedIds.length,
     });
 
-    const queuedLinks = getLinksByIds(queuedIds);
+    const queuedLinks = (await getLinksByIds(queuedIds)).sort((left, right) => {
+      if (left.retryCount !== right.retryCount) {
+        return left.retryCount - right.retryCount;
+      }
+
+      return new Date(right.firstSeenAt).getTime() - new Date(left.firstSeenAt).getTime();
+    });
 
     let processed = 0;
     let succeeded = 0;
     let failed = 0;
 
     const limit = pLimit(appConfig.ingestionConcurrency);
-    const publishProgress = (currentItemUrl: string | null) => {
-      updateIngestRunProgress(runId, {
+    const publishProgress = async (currentItemUrl: string | null) => {
+      await updateIngestRunProgress(runId, {
         processed,
         succeeded,
         failed,
@@ -101,7 +109,7 @@ export const runIngestionPipeline = async (
       });
 
       if (options.lockOwner) {
-        renewIngestLock(options.lockOwner);
+        await renewIngestLock(options.lockOwner);
       }
 
       if (processed > 0 && (processed % 5 === 0 || processed === queuedLinks.length)) {
@@ -119,53 +127,58 @@ export const runIngestionPipeline = async (
       queuedLinks.map((link) =>
         limit(async () => {
           const startedAt = Date.now();
-          publishProgress(link.normalizedUrl);
+          await publishProgress(link.normalizedUrl);
 
           try {
             const { extracted, modelUsed } = await runArticleExtractionGraph(link.normalizedUrl);
 
-            persistSuccessfulArticle({
+            await persistSuccessfulArticle({
               linkId: link.id,
               normalizedUrl: link.normalizedUrl,
               sourceDomain: link.sourceDomain,
               extracted,
+              modelUsed,
             });
 
-            recordAttempt({
+            await recordAttempt({
               runId,
               linkId: link.id,
               articleUrl: link.normalizedUrl,
               status: "success",
               modelUsed: modelUsed || undefined,
+              agentOutput: extracted as unknown as Record<string, unknown>,
               durationMs: Date.now() - startedAt,
             });
 
             succeeded += 1;
             processed += 1;
-            publishProgress(null);
+            await publishProgress(null);
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
 
-            markLinkFailure(link.id, message);
-            recordAttempt({
+            await markLinkFailure(link.id, message);
+            await recordAttempt({
               runId,
               linkId: link.id,
               articleUrl: link.normalizedUrl,
               status: "failed",
               errorMessage: message,
+              agentOutput: { error: message },
               durationMs: Date.now() - startedAt,
             });
 
             failed += 1;
             processed += 1;
-            publishProgress(null);
+            await publishProgress(null);
             logError("Article processing failed", { url: link.normalizedUrl, error: message });
           }
         }),
       ),
     );
 
-    await exportNewsArtifacts();
+    if (succeeded > 0) {
+      await exportNewsArtifacts();
+    }
 
     const summary: IngestionRunSummary = {
       runId,
@@ -180,13 +193,13 @@ export const runIngestionPipeline = async (
       failed,
     };
 
-    finalizeIngestRun(summary);
+    await finalizeIngestRun(summary);
     logInfo("Ingestion run completed", summary);
 
     return summary;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    failIngestRun(runId, message);
+    await failIngestRun(runId, message);
     logError("Ingestion run failed", { runId, error: message });
     throw error;
   }
