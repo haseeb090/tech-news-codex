@@ -49,6 +49,8 @@ export const appConfig = {
   ingestRunPruneCount: parseIntWithDefault(process.env.INGEST_RUN_PRUNE_COUNT, 50),
   ingestAttemptRecordLimit: parseIntWithDefault(process.env.INGEST_ATTEMPT_RECORD_LIMIT, 1200),
   ingestAttemptPruneCount: parseIntWithDefault(process.env.INGEST_ATTEMPT_PRUNE_COUNT, 250),
+  ingestEventRecordLimit: parseIntWithDefault(process.env.INGEST_EVENT_RECORD_LIMIT, 5000),
+  ingestEventPruneCount: parseIntWithDefault(process.env.INGEST_EVENT_PRUNE_COUNT, 1000),
   loginAuditRecordLimit: parseIntWithDefault(process.env.LOGIN_AUDIT_RECORD_LIMIT, 500),
   loginAuditPruneCount: parseIntWithDefault(process.env.LOGIN_AUDIT_PRUNE_COUNT, 100),
   dataDirectory: path.resolve(process.cwd(), "data"),

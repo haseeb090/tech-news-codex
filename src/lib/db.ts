@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 
 import { getDb, closeDb as closeLibsql } from "@/db/client";
-import { appLocks, articleAttempts, articleLinks, articles, feeds, ingestRuns, loginAudit, rateLimits } from "@/db/schema";
+import { appLocks, articleAttempts, articleLinks, articles, feeds, ingestEvents, ingestRuns, loginAudit, rateLimits } from "@/db/schema";
 import { appConfig } from "@/lib/config";
 import { buildRetryPlan } from "@/lib/ingestion/retry-policy";
 import { getSourcePolicy } from "@/lib/ingestion/source-policy";
@@ -9,6 +9,7 @@ import type {
   ArticleAttemptRecord,
   ArticleRecord,
   ExtractedArticle,
+  IngestEventRecord,
   IngestionRunRecord,
   IngestionRunSummary,
   LinkRecord,
@@ -81,9 +82,27 @@ const mapAttempt = (row: typeof articleAttempts.$inferSelect): ArticleAttemptRec
   createdAt: row.createdAt.toISOString(),
 });
 
+const mapEvent = (row: typeof ingestEvents.$inferSelect): IngestEventRecord => ({
+  id: row.id,
+  runId: row.runId,
+  linkId: row.linkId,
+  articleUrl: row.articleUrl,
+  level: row.level as IngestEventRecord["level"],
+  stage: row.stage,
+  message: row.message,
+  details: row.details,
+  createdAt: row.createdAt.toISOString(),
+});
+
 const countRows = async (
   dbLike: Pick<DbClient, "select"> | Pick<TxClient, "select">,
-  table: typeof articles | typeof articleLinks | typeof ingestRuns | typeof articleAttempts | typeof loginAudit,
+  table:
+    | typeof articles
+    | typeof articleLinks
+    | typeof ingestRuns
+    | typeof articleAttempts
+    | typeof ingestEvents
+    | typeof loginAudit,
 ): Promise<number> => {
   const rows = await dbLike.select({ count: sql<number>`count(*)` }).from(table);
   return Number(rows[0]?.count || 0);
@@ -133,6 +152,7 @@ const pruneIngestRunsIfNeeded = async (tx: TxClient) => {
   if (removable.length === 0) return;
 
   const runIds = removable.map((row) => row.id);
+  await tx.delete(ingestEvents).where(inArray(ingestEvents.runId, runIds));
   await tx.delete(articleAttempts).where(inArray(articleAttempts.runId, runIds));
   await tx.delete(ingestRuns).where(inArray(ingestRuns.id, runIds));
 };
@@ -149,6 +169,20 @@ const pruneAttemptsIfNeeded = async (tx: TxClient) => {
 
   if (removable.length === 0) return;
   await tx.delete(articleAttempts).where(inArray(articleAttempts.id, removable.map((row) => row.id)));
+};
+
+const pruneEventsIfNeeded = async (tx: TxClient) => {
+  const count = await countRows(tx, ingestEvents);
+  if (count + 1 <= appConfig.ingestEventRecordLimit) return;
+
+  const removable = await tx
+    .select({ id: ingestEvents.id })
+    .from(ingestEvents)
+    .orderBy(asc(ingestEvents.createdAt))
+    .limit(appConfig.ingestEventPruneCount);
+
+  if (removable.length === 0) return;
+  await tx.delete(ingestEvents).where(inArray(ingestEvents.id, removable.map((row) => row.id)));
 };
 
 const pruneLoginAuditIfNeeded = async (tx: TxClient) => {
@@ -301,14 +335,24 @@ export const updateIngestRunProgress = async (
   progress: { processed: number; succeeded: number; failed: number; currentItemUrl?: string | null },
 ): Promise<void> => {
   const db = getDb();
+  const nextValues: {
+    processed: number;
+    succeeded: number;
+    failed: number;
+    currentItemUrl?: string | null;
+  } = {
+    processed: progress.processed,
+    succeeded: progress.succeeded,
+    failed: progress.failed,
+  };
+
+  if (progress.currentItemUrl !== undefined) {
+    nextValues.currentItemUrl = progress.currentItemUrl;
+  }
+
   await db
     .update(ingestRuns)
-    .set({
-      processed: progress.processed,
-      succeeded: progress.succeeded,
-      failed: progress.failed,
-      currentItemUrl: progress.currentItemUrl || null,
-    })
+    .set(nextValues)
     .where(eq(ingestRuns.id, runId));
 };
 
@@ -376,6 +420,32 @@ export const recordAttempt = async (params: {
       modelUsed: params.modelUsed || null,
       agentOutput: params.agentOutput || null,
       durationMs: params.durationMs,
+      createdAt: nowDate(),
+    });
+  });
+};
+
+export const recordIngestEvent = async (params: {
+  runId: number;
+  level?: IngestEventRecord["level"];
+  stage: string;
+  message: string;
+  linkId?: number | null;
+  articleUrl?: string | null;
+  details?: Record<string, unknown> | null;
+}): Promise<void> => {
+  const db = getDb();
+
+  await db.transaction(async (tx) => {
+    await pruneEventsIfNeeded(tx);
+    await tx.insert(ingestEvents).values({
+      runId: params.runId,
+      linkId: params.linkId || null,
+      articleUrl: params.articleUrl || null,
+      level: params.level || "info",
+      stage: params.stage,
+      message: params.message.slice(0, 1000),
+      details: params.details || null,
       createdAt: nowDate(),
     });
   });
@@ -515,6 +585,17 @@ export const getLastRun = async (): Promise<IngestionRunRecord | null> => {
   return rows[0] ? mapRun(rows[0]) : null;
 };
 
+export const getLastCompletedRun = async (): Promise<IngestionRunRecord | null> => {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(ingestRuns)
+    .where(or(eq(ingestRuns.status, "completed"), eq(ingestRuns.status, "failed")))
+    .orderBy(desc(ingestRuns.id))
+    .limit(1);
+  return rows[0] ? mapRun(rows[0]) : null;
+};
+
 export const getActiveRun = async (): Promise<IngestionRunRecord | null> => {
   const db = getDb();
   const rows = await db
@@ -541,6 +622,28 @@ export const getRecentAttempts = async (limit = 25): Promise<ArticleAttemptRecor
   const db = getDb();
   const rows = await db.select().from(articleAttempts).orderBy(desc(articleAttempts.createdAt)).limit(limit);
   return rows.map(mapAttempt);
+};
+
+export const getAttemptsByRunId = async (runId: number, limit = 200): Promise<ArticleAttemptRecord[]> => {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(articleAttempts)
+    .where(eq(articleAttempts.runId, runId))
+    .orderBy(desc(articleAttempts.createdAt))
+    .limit(limit);
+  return rows.map(mapAttempt);
+};
+
+export const getIngestEventsByRunId = async (runId: number, limit = 400): Promise<IngestEventRecord[]> => {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(ingestEvents)
+    .where(eq(ingestEvents.runId, runId))
+    .orderBy(desc(ingestEvents.createdAt))
+    .limit(limit);
+  return rows.map(mapEvent);
 };
 
 export const acquireAppLock = async (name: string, ownerId: string, ttlMs: number): Promise<boolean> => {

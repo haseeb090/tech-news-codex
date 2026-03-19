@@ -67,6 +67,18 @@ export interface ArticleAttemptRecord {
   createdAt: string;
 }
 
+export interface IngestEventRecord {
+  id: number;
+  runId: number;
+  linkId: number | null;
+  articleUrl: string | null;
+  level: "info" | "warn" | "error";
+  stage: string;
+  message: string;
+  details: Record<string, unknown> | null;
+  createdAt: string;
+}
+
 export interface NewsQuery {
   q?: string;
   source?: string;

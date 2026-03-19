@@ -10,6 +10,15 @@ import { assertSafeRemoteUrl } from "@/lib/ssrf";
 import type { ExtractedArticle } from "@/lib/types";
 import { getSourceDomain } from "@/lib/url-utils";
 
+export interface ArticleGraphEvent {
+  level?: "info" | "warn" | "error";
+  stage: string;
+  message: string;
+  details?: Record<string, unknown> | null;
+}
+
+type ArticleGraphObserver = (event: ArticleGraphEvent) => void | Promise<void>;
+
 const ArticleState = Annotation.Root({
   url: Annotation<string>,
   sourceDomain: Annotation<string>,
@@ -30,10 +39,32 @@ const appendDiagnostics = (current: string[], ...next: Array<string | null | und
   ...next.filter((value): value is string => Boolean(value)),
 ];
 
-const fetchNode = async (state: typeof ArticleState.State) => {
+const emitGraphEvent = async (observer: ArticleGraphObserver | undefined, event: ArticleGraphEvent): Promise<void> => {
+  if (!observer) return;
+  await observer(event);
+};
+
+const createFetchNode = (observer?: ArticleGraphObserver) => async (state: typeof ArticleState.State) => {
   await assertSafeRemoteUrl(state.url);
   const sourcePolicy = getSourcePolicy(state.url);
+  await emitGraphEvent(observer, {
+    stage: "graph.fetch",
+    message: "Fetching article HTML",
+    details: {
+      url: state.url,
+      sourceDomain: state.sourceDomain,
+      fetchTimeoutMs: sourcePolicy.fetchTimeoutMs,
+    },
+  });
   const html = await fetchHtml(state.url, sourcePolicy.fetchTimeoutMs);
+  await emitGraphEvent(observer, {
+    stage: "graph.fetch",
+    message: "Fetched article HTML",
+    details: {
+      url: state.url,
+      htmlLength: html.length,
+    },
+  });
 
   return {
     sourceDomain: getSourceDomain(state.url),
@@ -42,13 +73,22 @@ const fetchNode = async (state: typeof ArticleState.State) => {
   };
 };
 
-const diagnoseNode = async (state: typeof ArticleState.State) => {
+const createDiagnoseNode = (observer?: ArticleGraphObserver) => async (state: typeof ArticleState.State) => {
   const sourceText = sourceTextForValidation(state.html, state.url);
   const diagnostics = appendDiagnostics(
     state.diagnostics,
     sourceText.length < 240 ? "thin-source-text" : null,
     state.sourcePolicy?.skipLlmWhenBodyMissing && sourceText.length < 240 ? "skip-llm-when-body-missing" : null,
   );
+  await emitGraphEvent(observer, {
+    stage: "graph.diagnose",
+    message: "Diagnosed fetched article payload",
+    details: {
+      url: state.url,
+      sourceTextLength: sourceText.length,
+      diagnostics,
+    },
+  });
 
   return {
     sourceText,
@@ -56,12 +96,22 @@ const diagnoseNode = async (state: typeof ArticleState.State) => {
   };
 };
 
-const deterministicNode = async (state: typeof ArticleState.State) => {
+const createDeterministicNode = (observer?: ArticleGraphObserver) => async (state: typeof ArticleState.State) => {
   const extracted = deterministicExtract(state.html, state.url);
   const diagnostics = appendDiagnostics(
     state.diagnostics,
     extracted.body.length < 240 ? "deterministic-body-too-short" : null,
   );
+  await emitGraphEvent(observer, {
+    stage: "graph.deterministic",
+    message: "Deterministic extraction completed",
+    details: {
+      url: state.url,
+      titleLength: extracted.title.length,
+      bodyLength: extracted.body.length,
+      diagnostics,
+    },
+  });
 
   return {
     extracted,
@@ -69,8 +119,14 @@ const deterministicNode = async (state: typeof ArticleState.State) => {
   };
 };
 
-const decideFallbackNode = async (state: typeof ArticleState.State) => {
+const createDecideFallbackNode = (observer?: ArticleGraphObserver) => async (state: typeof ArticleState.State) => {
   if (!state.extracted) {
+    await emitGraphEvent(observer, {
+      level: "error",
+      stage: "graph.decision",
+      message: "No extracted article available after deterministic phase",
+      details: { url: state.url },
+    });
     return {
       needsLlm: false,
       validationReason: "No extracted article available",
@@ -84,6 +140,21 @@ const decideFallbackNode = async (state: typeof ArticleState.State) => {
   const shouldSkipLlmFallback =
     sourcePolicy.skipLlmWhenBodyMissing && state.extracted.body.length < 240 && state.sourceText.length < 240;
   const validationReason = validation.reason || "Deterministic extraction quality gate failed";
+  await emitGraphEvent(observer, {
+    level: validation.ok ? "info" : shouldSkipLlmFallback ? "warn" : "info",
+    stage: "graph.decision",
+    message: validation.ok
+      ? "Deterministic extraction passed validation"
+      : shouldSkipLlmFallback
+        ? "Skipping LLM fallback due to source policy"
+        : "Routing article to LLM fallback",
+    details: {
+      url: state.url,
+      validationReason: validation.ok ? null : validationReason,
+      shouldSkipLlmFallback,
+      diagnostics: state.diagnostics,
+    },
+  });
 
   return {
     needsLlm: !validation.ok && !shouldSkipLlmFallback,
@@ -97,7 +168,7 @@ const decideFallbackNode = async (state: typeof ArticleState.State) => {
   };
 };
 
-const llmFallbackNode = async (state: typeof ArticleState.State) => {
+const createLlmFallbackNode = (observer?: ArticleGraphObserver) => async (state: typeof ArticleState.State) => {
   if (!state.sourcePolicy) {
     return {
       needsLlm: false,
@@ -112,6 +183,16 @@ const llmFallbackNode = async (state: typeof ArticleState.State) => {
     };
   }
 
+  await emitGraphEvent(observer, {
+    stage: "graph.llm",
+    message: "Waiting for Ollama fallback response",
+    details: {
+      url: state.url,
+      model: appConfig.ollamaModel,
+      processingTimeoutMs: state.sourcePolicy.processingTimeoutMs,
+      sourceTextLength: state.sourceText.length,
+    },
+  });
   const fallbackTitle = state.extracted?.title || "";
   const extracted = await llmExtractArticle({
     url: state.url,
@@ -120,6 +201,16 @@ const llmFallbackNode = async (state: typeof ArticleState.State) => {
     fallbackTitle,
     processingTimeoutMs: state.sourcePolicy.processingTimeoutMs,
     htmlMaxChars: state.sourcePolicy.llmHtmlMaxChars,
+  });
+  await emitGraphEvent(observer, {
+    stage: "graph.llm",
+    message: "Received Ollama fallback response",
+    details: {
+      url: state.url,
+      model: appConfig.ollamaModel,
+      titleLength: extracted.title.length,
+      bodyLength: extracted.body.length,
+    },
   });
 
   return {
@@ -131,8 +222,14 @@ const llmFallbackNode = async (state: typeof ArticleState.State) => {
   };
 };
 
-const validateNode = async (state: typeof ArticleState.State) => {
+const createValidateNode = (observer?: ArticleGraphObserver) => async (state: typeof ArticleState.State) => {
   if (!state.extracted) {
+    await emitGraphEvent(observer, {
+      level: "error",
+      stage: "graph.validate",
+      message: "Validation failed because no extracted article exists",
+      details: { url: state.url },
+    });
     return {
       validationReason: "No extracted article available",
       error: "No extracted article available",
@@ -142,6 +239,15 @@ const validateNode = async (state: typeof ArticleState.State) => {
 
   const validation = validateExtractionAgainstSource(state.extracted, state.sourceText);
   if (!validation.ok) {
+    await emitGraphEvent(observer, {
+      level: "warn",
+      stage: "graph.validate",
+      message: "Final validation failed",
+      details: {
+        url: state.url,
+        reason: validation.reason || "Final validation failed",
+      },
+    });
     return {
       validationReason: validation.reason || "Final validation failed",
       error: validation.reason || "Final validation failed",
@@ -152,6 +258,15 @@ const validateNode = async (state: typeof ArticleState.State) => {
     };
   }
 
+  await emitGraphEvent(observer, {
+    stage: "graph.validate",
+    message: "Final validation passed",
+    details: {
+      url: state.url,
+      modelUsed: state.usedModel || "deterministic",
+    },
+  });
+
   return {
     validationReason: null,
     error: null,
@@ -159,7 +274,7 @@ const validateNode = async (state: typeof ArticleState.State) => {
   };
 };
 
-const classifyFailureNode = async (state: typeof ArticleState.State) => {
+const createClassifyFailureNode = (observer?: ArticleGraphObserver) => async (state: typeof ArticleState.State) => {
   if (!state.error) {
     return {
       failureClassification: null,
@@ -167,6 +282,16 @@ const classifyFailureNode = async (state: typeof ArticleState.State) => {
   }
 
   const failureClassification = classifyFailure(state.error);
+  await emitGraphEvent(observer, {
+    level: failureClassification === "terminal" ? "warn" : "error",
+    stage: "graph.classify",
+    message: "Classified graph failure",
+    details: {
+      url: state.url,
+      error: state.error,
+      failureClassification,
+    },
+  });
 
   return {
     failureClassification,
@@ -185,28 +310,31 @@ const routeAfterValidation = (state: typeof ArticleState.State): string => {
   return END;
 };
 
-const articleGraph = new StateGraph(ArticleState)
-  .addNode("fetch", fetchNode)
-  .addNode("diagnose", diagnoseNode)
-  .addNode("deterministic", deterministicNode)
-  .addNode("decideFallback", decideFallbackNode)
-  .addNode("llmFallback", llmFallbackNode)
-  .addNode("validate", validateNode)
-  .addNode("classifyFailure", classifyFailureNode)
-  .addEdge(START, "fetch")
-  .addEdge("fetch", "diagnose")
-  .addEdge("diagnose", "deterministic")
-  .addEdge("deterministic", "decideFallback")
-  .addConditionalEdges("decideFallback", routeAfterDecision)
-  .addEdge("llmFallback", "validate")
-  .addConditionalEdges("validate", routeAfterValidation)
-  .addEdge("classifyFailure", END)
-  .compile();
+const createArticleGraph = (observer?: ArticleGraphObserver) =>
+  new StateGraph(ArticleState)
+    .addNode("fetch", createFetchNode(observer))
+    .addNode("diagnose", createDiagnoseNode(observer))
+    .addNode("deterministic", createDeterministicNode(observer))
+    .addNode("decideFallback", createDecideFallbackNode(observer))
+    .addNode("llmFallback", createLlmFallbackNode(observer))
+    .addNode("validate", createValidateNode(observer))
+    .addNode("classifyFailure", createClassifyFailureNode(observer))
+    .addEdge(START, "fetch")
+    .addEdge("fetch", "diagnose")
+    .addEdge("diagnose", "deterministic")
+    .addEdge("deterministic", "decideFallback")
+    .addConditionalEdges("decideFallback", routeAfterDecision)
+    .addEdge("llmFallback", "validate")
+    .addConditionalEdges("validate", routeAfterValidation)
+    .addEdge("classifyFailure", END)
+    .compile();
 
 export const runArticleExtractionGraph = async (
   url: string,
+  observer?: ArticleGraphObserver,
 ): Promise<{ extracted: ExtractedArticle; modelUsed: string | null }> => {
   const sourcePolicy = getSourcePolicy(url);
+  const articleGraph = createArticleGraph(observer);
   const timeoutMessage = `Article processing timed out after ${sourcePolicy.processingTimeoutMs}ms`;
   const result = await new Promise<Awaited<ReturnType<typeof articleGraph.invoke>>>((resolve, reject) => {
     const timeoutId = setTimeout(() => {

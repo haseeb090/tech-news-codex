@@ -93,6 +93,25 @@ export const articleAttempts = sqliteTable(
   }),
 );
 
+export const ingestEvents = sqliteTable(
+  "ingest_events",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    runId: integer("run_id").notNull(),
+    linkId: integer("link_id"),
+    articleUrl: text("article_url"),
+    level: text("level").notNull(),
+    stage: text("stage").notNull(),
+    message: text("message").notNull(),
+    details: text("details", { mode: "json" }).$type<Record<string, unknown> | null>(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    runCreatedIdx: index("idx_ingest_events_run_created").on(table.runId, table.createdAt),
+    stageIdx: index("idx_ingest_events_stage").on(table.stage, table.createdAt),
+  }),
+);
+
 export const appLocks = sqliteTable("app_locks", {
   name: text("name").primaryKey(),
   ownerId: text("owner_id").notNull(),
