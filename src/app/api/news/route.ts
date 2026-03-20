@@ -1,34 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { loadExportedNews } from "@/lib/export-news";
+import { getNewsFeedMeta, loadFeedPage } from "@/lib/news-data";
 
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
-  const query = (searchParams.get("q") || "").trim().toLowerCase();
-  const source = (searchParams.get("source") || "").trim().toLowerCase();
-  const limit = Number.parseInt(searchParams.get("limit") || "100", 10);
+  const query = (searchParams.get("q") || "").trim();
+  const source = (searchParams.get("source") || "").trim();
+  const topic = (searchParams.get("topic") || "").trim();
+  const sort = (searchParams.get("sort") || "newest").trim() as "newest" | "oldest" | "title";
+  const offset = Number.parseInt(searchParams.get("offset") || "0", 10);
+  const limit = Number.parseInt(searchParams.get("limit") || "24", 10);
 
-  const rows = await loadExportedNews();
-
-  let filtered = rows;
-
-  if (source) {
-    filtered = filtered.filter((row) => String(row.source || "").toLowerCase() === source);
-  }
-
-  if (query) {
-    filtered = filtered.filter((row) => {
-      const haystack = `${row.title || ""} ${row.body || ""} ${row.writer || ""}`.toLowerCase();
-      return haystack.includes(query);
-    });
-  }
-
-  const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 500) : 100;
+  const [{ items, total }, meta] = await Promise.all([
+    loadFeedPage({
+      offset: Number.isFinite(offset) ? Math.max(offset, 0) : 0,
+      limit: Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 36) : 24,
+      source: source && source !== "all" ? source : undefined,
+      query: query || undefined,
+      topic: topic && topic !== "all" ? topic : undefined,
+      sort,
+    }),
+    getNewsFeedMeta(),
+  ]);
 
   return NextResponse.json({
-    count: filtered.length,
-    items: filtered.slice(0, safeLimit),
+    total,
+    totalArticles: meta.totalArticles,
+    sources: meta.sources,
+    topics: meta.topics,
+    items,
   });
 }

@@ -1,0 +1,40 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: npm run docker:app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      NEXTAUTH_URL: http://localhost:3000
+      ADMIN_ENABLED: "true"
+      ADMIN_LOCAL_ONLY: "true"
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./.env.local:/app/.env.local:ro
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: npm run docker:worker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      NODE_ENV: production
+      NEXTAUTH_URL: http://localhost:3000
+      ADMIN_ENABLED: "true"
+      ADMIN_LOCAL_ONLY: "true"
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      WORKER_INTERVAL_MINUTES: "180"
+      WORKER_ALIGN_TO_INTERVAL: "true"
+      WORKER_RUN_ON_START: "true"
+    volumes:
+      - ./.env.local:/app/.env.local:ro
+    restart: unless-stopped

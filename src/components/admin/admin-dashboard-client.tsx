@@ -4,7 +4,13 @@ import { useEffect, useState } from "react";
 
 import { IngestionTriggerButton } from "@/components/admin/ingestion-trigger-button";
 import { classifyFailure } from "@/lib/ingestion/failure-classification";
-import type { ArticleAttemptRecord, IngestEventRecord, IngestionRunRecord, LinkRecord } from "@/lib/types";
+import type {
+  ArticleAttemptRecord,
+  IngestEventRecord,
+  IngestionRunRecord,
+  LinkRecord,
+  ReaderSignupEventRecord,
+} from "@/lib/types";
 
 interface AdminDashboardData {
   activeRun: IngestionRunRecord | null;
@@ -15,6 +21,8 @@ interface AdminDashboardData {
   currentRunAttempts: ArticleAttemptRecord[];
   timelineRun: IngestionRunRecord | null;
   timelineEvents: IngestEventRecord[];
+  totalReaderSignups: number;
+  recentReaderSignups: ReaderSignupEventRecord[];
 }
 
 interface AdminDashboardClientProps {
@@ -279,7 +287,15 @@ export function AdminDashboardClient({ initialData }: AdminDashboardClientProps)
             <h1 className="text-3xl font-bold text-slate-900">Ingestion Admin</h1>
             <p className="mt-2 text-sm text-slate-600">Run pipelines manually, monitor progress, and inspect failures.</p>
           </div>
-          <IngestionTriggerButton onTriggered={() => void refresh()} />
+          <IngestionTriggerButton
+            onTriggered={() => void refresh()}
+            disabled={Boolean(data.activeRun)}
+            disabledReason={
+              data.activeRun
+                ? "A run is already active. Wait for it to finish or inspect the live timeline below."
+                : null
+            }
+          />
         </div>
       </section>
 
@@ -305,6 +321,44 @@ export function AdminDashboardClient({ initialData }: AdminDashboardClientProps)
           <p className="mt-2 text-2xl font-bold text-rose-700">
             {data.activeRun ? data.activeRun.failed : data.lastCompletedRun?.failed || 0}
           </p>
+        </div>
+      </section>
+
+      <section className="grid gap-4 md:grid-cols-[280px_1fr]">
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Reader Signups</p>
+          <p className="mt-3 text-4xl font-bold text-slate-900">{data.totalReaderSignups}</p>
+          <p className="mt-2 text-sm text-slate-600">Tracked free reader accounts created through the gated feed experience.</p>
+        </div>
+
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-2xl font-bold text-slate-900">Recent Signups</h2>
+          {data.recentReaderSignups.length === 0 ? (
+            <p className="mt-3 text-sm text-slate-600">No reader signups recorded yet.</p>
+          ) : (
+            <div className="mt-4 max-h-[18rem] overflow-auto rounded-2xl border border-slate-200">
+              <table className="w-full min-w-[720px] border-collapse text-left text-sm">
+                <thead className="sticky top-0 bg-slate-50">
+                  <tr className="border-b border-slate-200 text-xs uppercase tracking-[0.16em] text-slate-500">
+                    <th className="py-3 pl-4">Time</th>
+                    <th className="py-3">Email</th>
+                    <th className="py-3">Origin</th>
+                    <th className="py-3 pr-4">IP</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.recentReaderSignups.map((signup) => (
+                    <tr key={signup.id} className="border-b border-slate-100 align-top">
+                      <td className="py-3 pl-4 pr-4">{fmt(signup.createdAt)}</td>
+                      <td className="py-3 pr-4 text-slate-700">{signup.email}</td>
+                      <td className="py-3 pr-4 text-slate-600">{signup.origin || "-"}</td>
+                      <td className="py-3 pr-4 text-slate-600">{signup.ipAddress || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </section>
 

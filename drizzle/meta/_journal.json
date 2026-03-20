@@ -15,6 +15,13 @@
       "when": 1773698372345,
       "tag": "0001_spicy_northstar",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1773917581944,
+      "tag": "0002_smooth_black_queen",
+      "breakpoints": true
     }
   ]
 }

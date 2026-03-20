@@ -14,7 +14,7 @@ export function LoginForm() {
     setLoading(true);
     setError(null);
 
-    const result = await signIn("credentials", {
+    const result = await signIn("admin-credentials", {
       username,
       password,
       redirect: false,
@@ -22,7 +22,7 @@ export function LoginForm() {
     });
 
     if (!result || result.error) {
-      setError("Invalid credentials.");
+      setError("Invalid credentials or too many recent attempts. Please retry in a few minutes if the password is correct.");
       setLoading(false);
       return;
     }

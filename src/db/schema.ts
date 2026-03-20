@@ -146,3 +146,35 @@ export const loginAudit = sqliteTable(
     createdIdx: index("idx_login_audit_created").on(table.createdAt),
   }),
 );
+
+export const readerUsers = sqliteTable(
+  "reader_users",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    email: text("email").notNull(),
+    passwordHash: text("password_hash").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    lastLoginAt: integer("last_login_at", { mode: "timestamp_ms" }),
+  },
+  (table) => ({
+    emailIdx: uniqueIndex("idx_reader_users_email").on(table.email),
+    createdIdx: index("idx_reader_users_created").on(table.createdAt),
+  }),
+);
+
+export const readerSignupEvents = sqliteTable(
+  "reader_signup_events",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull(),
+    email: text("email").notNull(),
+    ipAddress: text("ip_address"),
+    origin: text("origin"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    createdIdx: index("idx_reader_signup_events_created").on(table.createdAt),
+    userCreatedIdx: index("idx_reader_signup_events_user_created").on(table.userId, table.createdAt),
+  }),
+);

@@ -79,6 +79,23 @@ export interface IngestEventRecord {
   createdAt: string;
 }
 
+export interface ReaderUserRecord {
+  id: number;
+  email: string;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt: string | null;
+}
+
+export interface ReaderSignupEventRecord {
+  id: number;
+  userId: number;
+  email: string;
+  ipAddress: string | null;
+  origin: string | null;
+  createdAt: string;
+}
+
 export interface NewsQuery {
   q?: string;
   source?: string;

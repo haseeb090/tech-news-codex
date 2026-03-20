@@ -6,15 +6,19 @@ import {
   getLastCompletedRun,
   getLastRun,
   getRecentAttempts,
+  getReaderSignupCount,
+  getRecentReaderSignups,
 } from "@/lib/db";
 
 export const getAdminDashboardData = async () => {
-  const [activeRun, lastRun, lastCompletedRun, failedLinks, recentAttempts] = await Promise.all([
+  const [activeRun, lastRun, lastCompletedRun, failedLinks, recentAttempts, totalReaderSignups, recentReaderSignups] = await Promise.all([
     getActiveRun(),
     getLastRun(),
     getLastCompletedRun(),
     getFailedLinks(75),
     getRecentAttempts(150),
+    getReaderSignupCount(),
+    getRecentReaderSignups(25),
   ]);
 
   const timelineRun = activeRun ?? lastCompletedRun ?? lastRun;
@@ -32,5 +36,7 @@ export const getAdminDashboardData = async () => {
     currentRunAttempts,
     timelineRun,
     timelineEvents,
+    totalReaderSignups,
+    recentReaderSignups,
   };
 };

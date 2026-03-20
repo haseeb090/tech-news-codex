@@ -1,7 +1,19 @@
-import { and, asc, desc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, like, lte, or, sql } from "drizzle-orm";
 
 import { getDb, closeDb as closeLibsql } from "@/db/client";
-import { appLocks, articleAttempts, articleLinks, articles, feeds, ingestEvents, ingestRuns, loginAudit, rateLimits } from "@/db/schema";
+import {
+  appLocks,
+  articleAttempts,
+  articleLinks,
+  articles,
+  feeds,
+  ingestEvents,
+  ingestRuns,
+  loginAudit,
+  rateLimits,
+  readerSignupEvents,
+  readerUsers,
+} from "@/db/schema";
 import { appConfig } from "@/lib/config";
 import { buildRetryPlan } from "@/lib/ingestion/retry-policy";
 import { getSourcePolicy } from "@/lib/ingestion/source-policy";
@@ -13,6 +25,8 @@ import type {
   IngestionRunRecord,
   IngestionRunSummary,
   LinkRecord,
+  ReaderSignupEventRecord,
+  ReaderUserRecord,
 } from "@/lib/types";
 
 type DbClient = ReturnType<typeof getDb>;
@@ -91,6 +105,23 @@ const mapEvent = (row: typeof ingestEvents.$inferSelect): IngestEventRecord => (
   stage: row.stage,
   message: row.message,
   details: row.details,
+  createdAt: row.createdAt.toISOString(),
+});
+
+const mapReaderUser = (row: typeof readerUsers.$inferSelect): ReaderUserRecord => ({
+  id: row.id,
+  email: row.email,
+  createdAt: row.createdAt.toISOString(),
+  updatedAt: row.updatedAt.toISOString(),
+  lastLoginAt: toIso(row.lastLoginAt),
+});
+
+const mapReaderSignupEvent = (row: typeof readerSignupEvents.$inferSelect): ReaderSignupEventRecord => ({
+  id: row.id,
+  userId: row.userId,
+  email: row.email,
+  ipAddress: row.ipAddress,
+  origin: row.origin,
   createdAt: row.createdAt.toISOString(),
 });
 
@@ -567,6 +598,64 @@ export const getLatestArticles = async (limit: number): Promise<ArticleRecord[]>
   return rows.map(mapArticle);
 };
 
+export const getArticleCount = async (): Promise<number> => {
+  const db = getDb();
+  const rows = await db.select({ count: sql<number>`count(*)` }).from(articles);
+  return Number(rows[0]?.count || 0);
+};
+
+export const queryArticles = async (params: {
+  offset?: number;
+  limit?: number;
+  source?: string;
+  query?: string;
+  sort?: "newest" | "oldest" | "title";
+}): Promise<{ items: ArticleRecord[]; total: number }> => {
+  const db = getDb();
+  const offset = Math.max(0, params.offset || 0);
+  const limit = Math.min(Math.max(params.limit || 24, 1), Math.max(appConfig.articleRecordLimit, 100));
+  const predicates = [];
+
+  if (params.source) {
+    predicates.push(eq(articles.sourceDomain, params.source));
+  }
+
+  if (params.query) {
+    const queryValue = `%${params.query.toLowerCase()}%`;
+    predicates.push(
+      or(
+        sql`lower(${articles.title}) like ${queryValue}`,
+        sql`lower(${articles.body}) like ${queryValue}`,
+        sql`lower(coalesce(${articles.writer}, '')) like ${queryValue}`,
+      ),
+    );
+  }
+
+  const whereClause = predicates.length > 0 ? and(...predicates) : undefined;
+  const orderByClause =
+    params.sort === "oldest"
+      ? [asc(articles.publishedAt), asc(articles.createdAt)]
+      : params.sort === "title"
+        ? [asc(articles.title), desc(articles.createdAt)]
+        : [desc(articles.publishedAt), desc(articles.createdAt)];
+
+  const [rows, countRowsResult] = await Promise.all([
+    db
+      .select()
+      .from(articles)
+      .where(whereClause)
+      .orderBy(...orderByClause)
+      .limit(limit)
+      .offset(offset),
+    db.select({ count: sql<number>`count(*)` }).from(articles).where(whereClause),
+  ]);
+
+  return {
+    items: rows.map(mapArticle),
+    total: Number(countRowsResult[0]?.count || 0),
+  };
+};
+
 export const getArticleById = async (id: number): Promise<ArticleRecord | null> => {
   const db = getDb();
   const rows = await db.select().from(articles).where(eq(articles.id, id)).limit(1);
@@ -790,4 +879,94 @@ export const recordLoginAudit = async (params: {
       createdAt: nowDate(),
     });
   });
+};
+
+export const clearAdminRateLimits = async (username: string): Promise<number> => {
+  const db = getDb();
+  const normalizedUsername = username.trim().toLowerCase();
+  const pattern = `login:${normalizedUsername}:%`;
+
+  const rows = await db.select({ key: rateLimits.key }).from(rateLimits).where(like(rateLimits.key, pattern));
+  if (rows.length === 0) {
+    return 0;
+  }
+
+  await db.delete(rateLimits).where(like(rateLimits.key, pattern));
+  return rows.length;
+};
+
+export const getReaderUserByEmail = async (
+  email: string,
+): Promise<(ReaderUserRecord & { passwordHash: string }) | null> => {
+  const db = getDb();
+  const normalizedEmail = email.trim().toLowerCase();
+  const rows = await db.select().from(readerUsers).where(eq(readerUsers.email, normalizedEmail)).limit(1);
+  if (!rows[0]) return null;
+
+  return {
+    ...mapReaderUser(rows[0]),
+    passwordHash: rows[0].passwordHash,
+  };
+};
+
+export const createReaderUser = async (params: {
+  email: string;
+  passwordHash: string;
+  ipAddress?: string | null;
+  origin?: string | null;
+}): Promise<ReaderUserRecord> => {
+  const db = getDb();
+  const now = nowDate();
+  const normalizedEmail = params.email.trim().toLowerCase();
+
+  return db.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(readerUsers)
+      .values({
+        email: normalizedEmail,
+        passwordHash: params.passwordHash,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+
+    const user = inserted[0];
+    await tx.insert(readerSignupEvents).values({
+      userId: user.id,
+      email: normalizedEmail,
+      ipAddress: params.ipAddress || null,
+      origin: params.origin || null,
+      createdAt: now,
+    });
+
+    return mapReaderUser(user);
+  });
+};
+
+export const updateReaderLastLoginAt = async (userId: number): Promise<void> => {
+  const db = getDb();
+  const now = nowDate();
+  await db
+    .update(readerUsers)
+    .set({
+      updatedAt: now,
+      lastLoginAt: now,
+    })
+    .where(eq(readerUsers.id, userId));
+};
+
+export const getReaderSignupCount = async (): Promise<number> => {
+  const db = getDb();
+  const rows = await db.select({ count: sql<number>`count(*)` }).from(readerUsers);
+  return Number(rows[0]?.count || 0);
+};
+
+export const getRecentReaderSignups = async (limit = 25): Promise<ReaderSignupEventRecord[]> => {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(readerSignupEvents)
+    .orderBy(desc(readerSignupEvents.createdAt))
+    .limit(limit);
+  return rows.map(mapReaderSignupEvent);
 };
