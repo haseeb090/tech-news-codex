@@ -1,8 +1,4 @@
-import path from "node:path";
-import { loadEnvConfig } from "@next/env";
 import curatedFeeds from "@/lib/ingestion/feeds.json";
-
-loadEnvConfig(process.cwd());
 
 const defaultFeeds = curatedFeeds.map((feed) => feed.feedUrl);
 
@@ -17,15 +13,32 @@ const parseBoolean = (value: string | undefined, fallback: boolean): boolean => 
   return ["1", "true", "yes", "on"].includes(value.toLowerCase());
 };
 
+const resolveUrl = (value: string | undefined, fallback: string): URL => {
+  try {
+    return new URL(value || fallback);
+  } catch {
+    return new URL(fallback);
+  }
+};
+
 const rssFeeds = process.env.RSS_FEEDS
   ? process.env.RSS_FEEDS.split(",").map((item) => item.trim()).filter(Boolean)
   : defaultFeeds;
 
 const production = process.env.NODE_ENV === "production";
+const appUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
+const appUrlObject = resolveUrl(process.env.NEXTAUTH_URL, appUrl);
+const authSecret = process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET;
+
+if (production && !authSecret) {
+  throw new Error("NEXTAUTH_SECRET or AUTH_SECRET must be set in production");
+}
 
 export const appConfig = {
-  appUrl: process.env.NEXTAUTH_URL || "http://localhost:3000",
-  authSecret: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET || "dev-secret-change-me",
+  appUrl,
+  appOrigin: appUrlObject.origin,
+  appUrlIsHttps: appUrlObject.protocol === "https:",
+  authSecret: authSecret || "dev-secret-change-me",
   adminUsername: process.env.ADMIN_USERNAME || "admin",
   adminPasswordHash: process.env.ADMIN_PASSWORD_HASH || "",
   adminEnabled: parseBoolean(process.env.ADMIN_ENABLED, !production),
@@ -69,9 +82,9 @@ export const appConfig = {
   ingestEventPruneCount: parseIntWithDefault(process.env.INGEST_EVENT_PRUNE_COUNT, 1000),
   loginAuditRecordLimit: parseIntWithDefault(process.env.LOGIN_AUDIT_RECORD_LIMIT, 500),
   loginAuditPruneCount: parseIntWithDefault(process.env.LOGIN_AUDIT_PRUNE_COUNT, 100),
-  dataDirectory: path.resolve(process.cwd(), "data"),
-  csvExportPath: path.resolve(process.cwd(), "data", "news-latest.csv"),
-  jsonExportPath: path.resolve(process.cwd(), "public", "news-latest.json"),
+  dataDirectory: "data",
+  csvExportPath: "data/news-latest.csv",
+  jsonExportPath: "public/news-latest.json",
 };
 
 export const isProduction = production;

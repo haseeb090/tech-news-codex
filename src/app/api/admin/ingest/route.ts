@@ -1,18 +1,18 @@
 import { getServerSession } from "next-auth";
 import { after, NextRequest, NextResponse } from "next/server";
 
+import { isSameOriginRequest } from "@/lib/auth/access";
 import { authOptions } from "@/lib/auth/options";
 import { isLocalRequest } from "@/lib/auth/access";
 import { appConfig } from "@/lib/config";
 import { prepareBackgroundIngestion } from "@/lib/ingestion/trigger-ingestion";
 import { logInfo, logWarn } from "@/lib/logger";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { buildRateLimitKey, checkRateLimit, getRequestIp } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
 const resolveKey = (request: NextRequest, userId: string): string => {
-  const forwarded = request.headers.get("x-forwarded-for") || "unknown";
-  return `admin-trigger:${userId}:${forwarded}`;
+  return buildRateLimitKey("admin-trigger", userId, getRequestIp(request) || "unknown");
 };
 
 const hasRemoteOllamaAccess = (): boolean => {
@@ -26,10 +26,17 @@ const hasRemoteOllamaAccess = (): boolean => {
 };
 
 export async function POST(request: NextRequest) {
+  if (!isSameOriginRequest(request)) {
+    logWarn("Rejected admin ingestion trigger due to invalid origin", {
+      origin: request.headers.get("origin") || request.headers.get("referer") || "unknown",
+    });
+    return NextResponse.json({ error: "Forbidden" }, { status: 403, headers: { "Cache-Control": "no-store" } });
+  }
+
   const session = await getServerSession(authOptions);
   if (!session?.user) {
     logWarn("Rejected admin ingestion trigger due to missing session");
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
   }
 
   const isTrustedLocalAdmin = appConfig.adminLocalOnly && isLocalRequest(request);
@@ -43,7 +50,7 @@ export async function POST(request: NextRequest) {
       logWarn("Rejected admin ingestion trigger due to rate limit", {
         user: session.user.email || "admin",
       });
-      return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+      return NextResponse.json({ error: "Too many requests" }, { status: 429, headers: { "Cache-Control": "no-store" } });
     }
   }
 
@@ -54,14 +61,14 @@ export async function POST(request: NextRequest) {
         error:
           "OLLAMA_BASE_URL points to a local-only host. Run ingestion from your PC or point production to a reachable Ollama endpoint.",
       },
-      { status: 503 },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }
 
   const result = await prepareBackgroundIngestion("manual");
   if (!result.ok) {
     logWarn("Rejected ingestion trigger because a run is already active");
-    return NextResponse.json({ error: result.reason }, { status: 409 });
+    return NextResponse.json({ error: result.reason }, { status: 409, headers: { "Cache-Control": "no-store" } });
   }
 
   logInfo("Accepted admin ingestion trigger", {
@@ -72,5 +79,5 @@ export async function POST(request: NextRequest) {
     await result.run();
   });
 
-  return NextResponse.json({ ok: true, status: "started" }, { status: 202 });
+  return NextResponse.json({ ok: true, status: "started" }, { status: 202, headers: { "Cache-Control": "no-store" } });
 }

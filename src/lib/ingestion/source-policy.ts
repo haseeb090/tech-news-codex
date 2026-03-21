@@ -48,6 +48,11 @@ const SOURCE_POLICY_OVERRIDES: SourcePolicyOverride[] = [
     domains: ["www.technologyreview.com", "www.theverge.com", "www.wired.com"],
     llmHtmlMaxChars: 30_000,
   },
+  {
+    domains: ["www.theverge.com"],
+    processingTimeoutMs: 95_000,
+    llmHtmlMaxChars: 24_000,
+  },
 ];
 
 const DEFAULT_POLICY = (sourceDomain: string): SourceProcessingPolicy => ({
@@ -62,11 +67,18 @@ const DEFAULT_POLICY = (sourceDomain: string): SourceProcessingPolicy => ({
 
 export const getSourcePolicy = (urlOrDomain: string): SourceProcessingPolicy => {
   const sourceDomain = urlOrDomain.includes("://") ? getSourceDomain(urlOrDomain) : urlOrDomain.toLowerCase();
-  const override = SOURCE_POLICY_OVERRIDES.find((candidate) => candidate.domains.includes(sourceDomain));
+  const override = SOURCE_POLICY_OVERRIDES.reduce<Partial<SourceProcessingPolicy>>((merged, candidate) => {
+    if (!candidate.domains.includes(sourceDomain)) {
+      return merged;
+    }
 
-  if (!override) {
-    return DEFAULT_POLICY(sourceDomain);
-  }
+    const policyOverride = { ...candidate } as Partial<SourceProcessingPolicy> & { domains?: string[] };
+    delete policyOverride.domains;
+    return {
+      ...merged,
+      ...policyOverride,
+    };
+  }, {});
 
   return {
     ...DEFAULT_POLICY(sourceDomain),

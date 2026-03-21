@@ -44,7 +44,7 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
   const sourceHost = formatSourceHost(item.url);
 
   return (
-    <main className="mx-auto max-w-4xl space-y-8">
+    <main id="main-content" className="mx-auto max-w-4xl space-y-8">
       <div className="feed-card glass-orbit space-y-5 rounded-[2rem] border p-8">
         <div className="flex flex-wrap items-center gap-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
           <span>{item.source}</span>
@@ -56,8 +56,8 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
         <div className="rounded-2xl border border-slate-200 bg-slate-50/90 p-4 text-sm leading-6 text-slate-700">
           <p className="font-semibold text-slate-900">Publisher attribution</p>
           <p className="mt-2">
-            This page shows a short, source-grounded excerpt for discovery. The original reporting, full article text, images,
-            and copyright remain with {item.source}.
+            This page shows an original Rubix Signal briefing grounded in the source report. The original reporting, article
+            text, images, and copyright remain with {item.source}.
           </p>
           <p className="mt-2">
             Read the complete piece on the publisher&apos;s site:{" "}
@@ -76,7 +76,7 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
             rel="noreferrer"
             className="ripple-action rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
           >
-            Open source article
+            Open original article
           </Link>
         </div>
       </div>
@@ -84,8 +84,8 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
       <article className="feed-card rounded-[2rem] border p-8 shadow-sm">
         <div className="space-y-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Source-grounded briefing</p>
-            <h2 className="mt-2 text-2xl font-black text-slate-900">A short excerpt for fast reading</h2>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Rubix briefing</p>
+            <h2 className="mt-2 text-2xl font-black text-slate-900">A rewritten briefing for fast reading</h2>
           </div>
 
           <div className="detail-body space-y-4 text-base leading-8 text-slate-700">
@@ -97,10 +97,10 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
           </div>
 
           <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/85 p-4 text-sm leading-6 text-slate-600">
-            <p className="font-semibold text-slate-900">Why the full article is not mirrored here</p>
+            <p className="font-semibold text-slate-900">Why the original article is not mirrored here</p>
             <p className="mt-2">
-              Tech Radar News is designed to help readers discover reporting and then continue on the original publisher&apos;s site.
-              We keep article pages attribution-first and intentionally limited to a short excerpt.
+              Rubix Signal is designed to help readers discover reporting and then continue on the original publisher&apos;s site.
+              We keep article pages attribution-first and intentionally publish original rewrites instead of source-copy mirrors.
             </p>
           </div>
         </div>

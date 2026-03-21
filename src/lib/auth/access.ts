@@ -1,5 +1,7 @@
 import type { NextRequest } from "next/server";
 
+import { appConfig } from "@/lib/config";
+
 const localHostnames = new Set(["localhost", "127.0.0.1", "::1"]);
 const localIpAddresses = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
@@ -20,13 +22,29 @@ export const isLocalRequest = (request: NextRequest): boolean => {
     return true;
   }
 
-  const forwardedHost = request.headers.get("x-forwarded-host");
-  if (forwardedHost) {
-    const host = forwardedHost.split(":")[0]?.trim().toLowerCase() || "";
-    if (isLocalHostname(host)) {
-      return true;
-    }
+  const requestIp = (request as NextRequest & { ip?: string | null }).ip;
+  if (isLocalIpAddress(requestIp)) {
+    return true;
   }
 
   return false;
+};
+
+const parseOrigin = (value: string | null): string | null => {
+  if (!value) return null;
+
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+};
+
+export const isSameOriginRequest = (request: NextRequest): boolean => {
+  const requestOrigin = parseOrigin(request.headers.get("origin")) || parseOrigin(request.headers.get("referer"));
+  if (!requestOrigin) {
+    return false;
+  }
+
+  return requestOrigin === appConfig.appOrigin;
 };

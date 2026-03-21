@@ -1,3 +1,5 @@
+import "@/lib/load-env";
+
 import { closeDb } from "@/lib/db";
 import { acquireIngestLock, createIngestLockOwner, releaseIngestLock } from "@/lib/ingestion/lock";
 import { runIngestionPipeline } from "@/lib/ingestion/run-ingestion";

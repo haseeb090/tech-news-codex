@@ -20,11 +20,11 @@ import { getSourcePolicy } from "@/lib/ingestion/source-policy";
 import type {
   ArticleAttemptRecord,
   ArticleRecord,
-  ExtractedArticle,
   IngestEventRecord,
   IngestionRunRecord,
   IngestionRunSummary,
   LinkRecord,
+  PreparedArticle,
   ReaderSignupEventRecord,
   ReaderUserRecord,
 } from "@/lib/types";
@@ -37,6 +37,13 @@ const nowDate = (): Date => new Date();
 const toIso = (value: Date | null | undefined): string | null => {
   if (!value) return null;
   return value.toISOString();
+};
+
+const toPersistedDate = (value: string | null | undefined): Date | null => {
+  if (!value) return null;
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
 const mapLink = (row: typeof articleLinks.$inferSelect): LinkRecord => ({
@@ -486,7 +493,7 @@ export const persistSuccessfulArticle = async (params: {
   linkId: number;
   normalizedUrl: string;
   sourceDomain: string;
-  extracted: ExtractedArticle;
+  article: PreparedArticle;
   modelUsed?: string | null;
 }): Promise<number> => {
   const db = getDb();
@@ -507,10 +514,10 @@ export const persistSuccessfulArticle = async (params: {
         .set({
           linkId: params.linkId,
           sourceDomain: params.sourceDomain,
-          title: params.extracted.title,
-          body: params.extracted.body,
-          writer: params.extracted.writer,
-          publishedAt: params.extracted.publishedAt ? new Date(params.extracted.publishedAt) : null,
+          title: params.article.title,
+          body: params.article.body,
+          writer: params.article.writer,
+          publishedAt: toPersistedDate(params.article.publishedAt),
           modelUsed: params.modelUsed || null,
           updatedAt: now,
         })
@@ -524,10 +531,10 @@ export const persistSuccessfulArticle = async (params: {
           linkId: params.linkId,
           canonicalUrl: params.normalizedUrl,
           sourceDomain: params.sourceDomain,
-          title: params.extracted.title,
-          body: params.extracted.body,
-          writer: params.extracted.writer,
-          publishedAt: params.extracted.publishedAt ? new Date(params.extracted.publishedAt) : null,
+          title: params.article.title,
+          body: params.article.body,
+          writer: params.article.writer,
+          publishedAt: toPersistedDate(params.article.publishedAt),
           modelUsed: params.modelUsed || null,
           createdAt: now,
           updatedAt: now,

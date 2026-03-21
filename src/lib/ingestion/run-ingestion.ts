@@ -21,6 +21,7 @@ import {
 import { exportNewsArtifacts } from "@/lib/export-news";
 import { runArticleExtractionGraph, type ArticleGraphEvent } from "@/lib/ingestion/article-graph";
 import { renewIngestLock } from "@/lib/ingestion/lock";
+import { getNonNewsReason } from "@/lib/ingestion/newsworthiness";
 import { fetchFeedLinks } from "@/lib/ingestion/rss";
 import { logError, logInfo, logWarn } from "@/lib/logger";
 import { getSourceDomain, normalizeUrl } from "@/lib/url-utils";
@@ -95,6 +96,7 @@ export const runIngestionPipeline = async (
     const linkIdsToProcess = new Set<number>();
     let totalDiscovered = 0;
     let newLinks = 0;
+    let skippedNonNews = 0;
 
     for (const feedUrl of appConfig.rssFeeds) {
       await registerFeedIfMissing(feedUrl);
@@ -107,17 +109,25 @@ export const runIngestionPipeline = async (
 
       try {
         const items = await fetchFeedLinks(feedUrl);
+        let skippedFromFeed = 0;
         totalDiscovered += items.length;
-        await emitRunEvent({
-          stage: "feed.fetch.success",
-          message: "Fetched RSS feed",
-          details: { feedUrl, discoveredLinks: items.length },
-        });
 
         for (const item of items) {
           try {
             const normalizedUrl = normalizeUrl(item.link);
             const sourceDomain = getSourceDomain(normalizedUrl);
+            const nonNewsReason = getNonNewsReason({
+              url: normalizedUrl,
+              sourceDomain,
+              title: item.title,
+            });
+
+            if (nonNewsReason) {
+              skippedNonNews += 1;
+              skippedFromFeed += 1;
+              continue;
+            }
+
             const { link, isNew } = await upsertDiscoveredLink(
               item.feedUrl,
               item.link,
@@ -136,6 +146,16 @@ export const runIngestionPipeline = async (
             });
           }
         }
+
+        await emitRunEvent({
+          stage: "feed.fetch.success",
+          message: "Fetched RSS feed",
+          details: {
+            feedUrl,
+            discoveredLinks: items.length,
+            skippedNonNews: skippedFromFeed,
+          },
+        });
       } catch (error) {
         await emitRunEvent({
           level: "warn",
@@ -166,6 +186,7 @@ export const runIngestionPipeline = async (
         totalDiscovered,
         newLinks,
         queuedForProcessing: queuedIds.length,
+        skippedNonNews,
       },
     });
 
@@ -235,7 +256,7 @@ export const runIngestionPipeline = async (
           await publishProgress(link.normalizedUrl);
 
           try {
-            const { extracted, modelUsed } = await runArticleExtractionGraph(
+            const { article, modelUsed, diagnostics } = await runArticleExtractionGraph(
               link.normalizedUrl,
               async (event: ArticleGraphEvent) => {
                 await emitRunEvent({
@@ -253,7 +274,7 @@ export const runIngestionPipeline = async (
               linkId: link.id,
               normalizedUrl: link.normalizedUrl,
               sourceDomain: link.sourceDomain,
-              extracted,
+              article,
               modelUsed,
             });
 
@@ -263,7 +284,14 @@ export const runIngestionPipeline = async (
               articleUrl: link.normalizedUrl,
               status: "success",
               modelUsed: modelUsed || undefined,
-              agentOutput: extracted as unknown as Record<string, unknown>,
+              agentOutput: {
+                title: article.title,
+                body: article.body,
+                writer: article.writer,
+                publishedAt: article.publishedAt,
+                outputKind: "paraphrased-summary",
+                diagnostics,
+              },
               durationMs: Date.now() - startedAt,
             });
 
@@ -275,9 +303,10 @@ export const runIngestionPipeline = async (
               linkId: link.id,
               articleUrl: link.normalizedUrl,
               details: {
-                modelUsed: modelUsed || "deterministic",
+                modelUsed: modelUsed || appConfig.ollamaModel,
                 durationMs: Date.now() - startedAt,
-                title: extracted.title,
+                title: article.title,
+                outputKind: "paraphrased-summary",
               },
             });
             await publishProgress(null);

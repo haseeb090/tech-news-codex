@@ -1,16 +1,29 @@
 import { hash } from "@node-rs/argon2";
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
 import { appConfig } from "@/lib/config";
-import { checkRateLimit, createReaderUser, getReaderUserByEmail } from "@/lib/db";
+import { createReaderUser, getReaderUserByEmail } from "@/lib/db";
 import { logInfo, logWarn } from "@/lib/logger";
+import { buildRateLimitKey, checkRateLimit, getRequestIp } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
+
+const signupSchema = z.object({
+  email: z.string().trim().email().max(254),
+  password: z.string().min(8).max(128),
+  origin: z
+    .string()
+    .trim()
+    .max(64)
+    .regex(/^[a-z0-9._-]+$/i)
+    .optional(),
+});
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const resolveIp = (request: NextRequest): string => {
-  return request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown";
+  return getRequestIp(request) || "unknown";
 };
 
 export async function POST(request: NextRequest) {
@@ -20,17 +33,27 @@ export async function POST(request: NextRequest) {
   }
 
   const ipAddress = resolveIp(request);
-  const body = (await request.json().catch(() => null)) as
-    | { email?: string; password?: string; origin?: string }
-    | null;
+  const contentLength = Number.parseInt(request.headers.get("content-length") || "0", 10);
+  if (Number.isFinite(contentLength) && contentLength > 16_384) {
+    return NextResponse.json({ error: "Request body too large." }, { status: 413 });
+  }
 
-  const email = body?.email?.trim().toLowerCase() || "";
-  const password = body?.password || "";
-  const origin = body?.origin?.trim() || "web";
+  const body = await request.json().catch(() => null);
+  const parsed = signupSchema.safeParse(body);
+  if (!parsed.success) {
+    logWarn("Rejected public signup due to invalid payload", {
+      issues: parsed.error.issues.map((issue) => issue.path.join(".") || "body"),
+    });
+    return NextResponse.json({ error: "Enter a valid email and password." }, { status: 400 });
+  }
+
+  const email = parsed.data.email.trim().toLowerCase();
+  const password = parsed.data.password;
+  const origin = parsed.data.origin || "web";
 
   if (appConfig.rateLimitingEnabled && process.env.NODE_ENV === "production") {
     const rate = await checkRateLimit(
-      `public-signup:${email || "unknown"}:${ipAddress}`,
+      buildRateLimitKey("public-signup", email || "unknown", ipAddress),
       appConfig.readerSignupRateLimitAttempts,
       appConfig.readerSignupRateLimitWindowMinutes * 60 * 1000,
     );

@@ -1,3 +1,5 @@
+import "@/lib/load-env";
+
 import { appConfig } from "@/lib/config";
 
 type CheckResult = {

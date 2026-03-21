@@ -10,6 +10,7 @@ const extractionSchema = z.object({
   body: z.string().min(280),
   writer: z.string().nullable(),
   publishedAt: z.string().nullable(),
+  context: z.string().nullable(),
 });
 
 const llm = new ChatOllama({
@@ -39,6 +40,7 @@ Rules:
 - Keep body as clean article text, not summary, minimum 280 characters.
 - Exclude navigation, newsletter prompts, ads, related links, footers, cookie banners, and comment sections.
 - Prefer the main article body only, preserving the original wording as much as possible.
+- If the page includes a subtitle, dek, or framing line that helps explain the headline, return it in context.
 - If writer or published date is missing, return null.
 
 URL: ${params.url}
@@ -56,5 +58,6 @@ ${promptSource}`;
     body: result.body,
     writer: result.writer,
     publishedAt: result.publishedAt,
+    context: result.context?.trim() || null,
   };
 };

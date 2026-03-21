@@ -65,7 +65,7 @@ interface GraphLinkStatus {
   nodes: Record<GraphNodeKey, GraphNodeStatus>;
 }
 
-type GraphNodeKey = "fetch" | "diagnose" | "deterministic" | "decision" | "llm" | "validate" | "classify" | "result";
+type GraphNodeKey = "fetch" | "diagnose" | "deterministic" | "decision" | "llm" | "validate" | "rewrite" | "classify" | "result";
 
 const graphNodeLabels: Array<{ key: GraphNodeKey; label: string }> = [
   { key: "fetch", label: "Fetch" },
@@ -74,6 +74,7 @@ const graphNodeLabels: Array<{ key: GraphNodeKey; label: string }> = [
   { key: "decision", label: "Decision" },
   { key: "llm", label: "LLM" },
   { key: "validate", label: "Validate" },
+  { key: "rewrite", label: "Rewrite" },
   { key: "classify", label: "Classify" },
   { key: "result", label: "Result" },
 ];
@@ -127,6 +128,7 @@ const createEmptyGraphNodes = (): Record<GraphNodeKey, GraphNodeStatus> => ({
   decision: "pending",
   llm: "pending",
   validate: "pending",
+  rewrite: "pending",
   classify: "pending",
   result: "pending",
 });
@@ -186,6 +188,14 @@ const deriveGraphBoard = (events: IngestEventRecord[]): GraphLinkStatus[] => {
       updateGraphNodeState(entry, "llm", event.message.startsWith("Waiting") ? "running" : "done", event.stage, event.createdAt);
     } else if (event.stage === "graph.validate") {
       updateGraphNodeState(entry, "validate", event.level === "warn" ? "warn" : event.level === "error" ? "error" : "done", event.stage, event.createdAt);
+    } else if (event.stage === "graph.rewrite") {
+      updateGraphNodeState(
+        entry,
+        "rewrite",
+        event.message.startsWith("Rewriting") ? "running" : event.level === "warn" ? "warn" : event.level === "error" ? "error" : "done",
+        event.stage,
+        event.createdAt,
+      );
     } else if (event.stage === "graph.classify") {
       updateGraphNodeState(entry, "classify", event.level === "error" ? "error" : "warn", event.stage, event.createdAt);
     } else if (event.stage === "link.process.start") {
@@ -218,7 +228,7 @@ const GraphNodeFlow = ({ entry }: { entry: GraphLinkStatus }) => {
               </div>
               {index < graphNodeLabels.length - 1 ? (
                 <div className={`text-lg font-bold ${graphArrowClasses[status]}`} aria-hidden="true">
-                  →
+                  {"->"}
                 </div>
               ) : null}
             </div>
@@ -492,7 +502,7 @@ export function AdminDashboardClient({ initialData }: AdminDashboardClientProps)
           <div>
             <h2 className="text-2xl font-bold text-slate-900">LangGraph Orchestration</h2>
             <p className="mt-2 text-sm text-slate-600">
-              Per-link node state for the extraction graph. This highlights fetch, diagnose, deterministic extraction, fallback decisions, validation, and final result.
+              Per-link node state for the extraction graph. This highlights fetch, diagnose, deterministic extraction, fallback decisions, validation, rewrite generation, and final result.
             </p>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
@@ -663,3 +673,4 @@ export function AdminDashboardClient({ initialData }: AdminDashboardClientProps)
     </>
   );
 }
+

@@ -4,10 +4,11 @@ import { appConfig } from "@/lib/config";
 import { classifyFailure, type FailureClassification } from "@/lib/ingestion/failure-classification";
 import { deterministicExtract, fetchHtml, sourceTextForValidation } from "@/lib/ingestion/deterministic-extract";
 import { llmExtractArticle } from "@/lib/ingestion/llm-extract";
+import { rewriteArticleForPublication } from "@/lib/ingestion/rewrite-article";
 import { getSourcePolicy, type SourceProcessingPolicy } from "@/lib/ingestion/source-policy";
 import { validateExtractionAgainstSource } from "@/lib/ingestion/validation";
 import { assertSafeRemoteUrl } from "@/lib/ssrf";
-import type { ExtractedArticle } from "@/lib/types";
+import type { ExtractedArticle, PreparedArticle } from "@/lib/types";
 import { getSourceDomain } from "@/lib/url-utils";
 
 export interface ArticleGraphEvent {
@@ -27,6 +28,7 @@ const ArticleState = Annotation.Root({
   sourceText: Annotation<string>,
   diagnostics: Annotation<string[]>,
   extracted: Annotation<ExtractedArticle | null>,
+  prepared: Annotation<PreparedArticle | null>,
   needsLlm: Annotation<boolean>,
   usedModel: Annotation<string | null>,
   validationReason: Annotation<string | null>,
@@ -101,6 +103,7 @@ const createDeterministicNode = (observer?: ArticleGraphObserver) => async (stat
   const diagnostics = appendDiagnostics(
     state.diagnostics,
     extracted.body.length < 240 ? "deterministic-body-too-short" : null,
+    extracted.context ? "deterministic-context-found" : null,
   );
   await emitGraphEvent(observer, {
     stage: "graph.deterministic",
@@ -109,6 +112,7 @@ const createDeterministicNode = (observer?: ArticleGraphObserver) => async (stat
       url: state.url,
       titleLength: extracted.title.length,
       bodyLength: extracted.body.length,
+      hasContext: Boolean(extracted.context),
       diagnostics,
     },
   });
@@ -210,6 +214,7 @@ const createLlmFallbackNode = (observer?: ArticleGraphObserver) => async (state:
       model: appConfig.ollamaModel,
       titleLength: extracted.title.length,
       bodyLength: extracted.body.length,
+      hasContext: Boolean(extracted.context),
     },
   });
 
@@ -264,6 +269,7 @@ const createValidateNode = (observer?: ArticleGraphObserver) => async (state: ty
     details: {
       url: state.url,
       modelUsed: state.usedModel || "deterministic",
+      hasContext: Boolean(state.extracted.context),
     },
   });
 
@@ -272,6 +278,75 @@ const createValidateNode = (observer?: ArticleGraphObserver) => async (state: ty
     error: null,
     diagnostics: appendDiagnostics(state.diagnostics, "final-validation-passed"),
   };
+};
+
+const createRewriteNode = (observer?: ArticleGraphObserver) => async (state: typeof ArticleState.State) => {
+  if (!state.extracted) {
+    return {
+      error: "No extracted article available for rewrite",
+      diagnostics: appendDiagnostics(state.diagnostics, "rewrite-missing-extraction"),
+    };
+  }
+
+  const sourcePolicy = state.sourcePolicy ?? getSourcePolicy(state.url);
+  await emitGraphEvent(observer, {
+    stage: "graph.rewrite",
+    message: "Rewriting article for publication-safe summary",
+    details: {
+      url: state.url,
+      model: appConfig.ollamaModel,
+      hasContext: Boolean(state.extracted.context),
+    },
+  });
+
+  try {
+    const rewritten = await rewriteArticleForPublication({
+      extracted: state.extracted,
+      sourceText: state.sourceText,
+      processingTimeoutMs: sourcePolicy.processingTimeoutMs,
+      sourceDomain: state.sourceDomain,
+    });
+
+    await emitGraphEvent(observer, {
+      stage: "graph.rewrite",
+      message: "Generated publication-safe article summary",
+      details: {
+        url: state.url,
+        model: rewritten.modelUsed,
+        attemptCount: rewritten.attemptCount,
+        strategy: rewritten.strategy,
+        titleLength: rewritten.article.title.length,
+        bodyLength: rewritten.article.body.length,
+      },
+    });
+
+    return {
+      prepared: rewritten.article,
+      usedModel: rewritten.modelUsed,
+      diagnostics: appendDiagnostics(
+        state.diagnostics,
+        "rewrite-summary-created",
+        `rewrite-strategy:${rewritten.strategy}`,
+        state.extracted.context ? "rewrite-used-title-context" : null,
+      ),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await emitGraphEvent(observer, {
+      level: "warn",
+      stage: "graph.rewrite",
+      message: "Rewrite stage failed",
+      details: {
+        url: state.url,
+        error: message,
+      },
+    });
+
+    return {
+      error: message,
+      diagnostics: appendDiagnostics(state.diagnostics, `rewrite-failed:${message}`),
+    };
+  }
 };
 
 const createClassifyFailureNode = (observer?: ArticleGraphObserver) => async (state: typeof ArticleState.State) => {
@@ -307,6 +382,11 @@ const routeAfterDecision = (state: typeof ArticleState.State): string => {
 
 const routeAfterValidation = (state: typeof ArticleState.State): string => {
   if (state.error) return "classifyFailure";
+  return "rewrite";
+};
+
+const routeAfterRewrite = (state: typeof ArticleState.State): string => {
+  if (state.error) return "classifyFailure";
   return END;
 };
 
@@ -318,6 +398,7 @@ const createArticleGraph = (observer?: ArticleGraphObserver) =>
     .addNode("decideFallback", createDecideFallbackNode(observer))
     .addNode("llmFallback", createLlmFallbackNode(observer))
     .addNode("validate", createValidateNode(observer))
+    .addNode("rewrite", createRewriteNode(observer))
     .addNode("classifyFailure", createClassifyFailureNode(observer))
     .addEdge(START, "fetch")
     .addEdge("fetch", "diagnose")
@@ -326,20 +407,22 @@ const createArticleGraph = (observer?: ArticleGraphObserver) =>
     .addConditionalEdges("decideFallback", routeAfterDecision)
     .addEdge("llmFallback", "validate")
     .addConditionalEdges("validate", routeAfterValidation)
+    .addConditionalEdges("rewrite", routeAfterRewrite)
     .addEdge("classifyFailure", END)
     .compile();
 
 export const runArticleExtractionGraph = async (
   url: string,
   observer?: ArticleGraphObserver,
-): Promise<{ extracted: ExtractedArticle; modelUsed: string | null }> => {
+): Promise<{ article: PreparedArticle; modelUsed: string | null; diagnostics: string[] }> => {
   const sourcePolicy = getSourcePolicy(url);
   const articleGraph = createArticleGraph(observer);
-  const timeoutMessage = `Article processing timed out after ${sourcePolicy.processingTimeoutMs}ms`;
+  const graphTimeoutMs = sourcePolicy.processingTimeoutMs * 4;
+  const timeoutMessage = `Article processing timed out after ${graphTimeoutMs}ms`;
   const result = await new Promise<Awaited<ReturnType<typeof articleGraph.invoke>>>((resolve, reject) => {
     const timeoutId = setTimeout(() => {
       reject(new Error(timeoutMessage));
-    }, sourcePolicy.processingTimeoutMs);
+    }, graphTimeoutMs);
 
     void articleGraph
       .invoke({
@@ -350,6 +433,7 @@ export const runArticleExtractionGraph = async (
         sourceText: "",
         diagnostics: [],
         extracted: null,
+        prepared: null,
         needsLlm: false,
         usedModel: null,
         validationReason: null,
@@ -372,12 +456,13 @@ export const runArticleExtractionGraph = async (
     throw new Error(result.error);
   }
 
-  if (!result.extracted) {
+  if (!result.prepared) {
     throw new Error("Extraction graph returned empty result");
   }
 
   return {
-    extracted: result.extracted,
-    modelUsed: result.usedModel,
+    article: result.prepared,
+    modelUsed: result.usedModel || appConfig.ollamaModel,
+    diagnostics: result.diagnostics,
   };
 };

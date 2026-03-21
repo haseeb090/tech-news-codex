@@ -20,12 +20,15 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-const storageKey = "tech-radar-theme";
+const storageKey = "rubix-signal-theme";
+const legacyStorageKey = "tech-radar-theme";
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<PublicThemeId>(() => {
     if (typeof window === "undefined") return "synthwave";
-    const stored = window.localStorage.getItem(storageKey) as PublicThemeId | null;
+    const stored =
+      (window.localStorage.getItem(storageKey) as PublicThemeId | null) ||
+      (window.localStorage.getItem(legacyStorageKey) as PublicThemeId | null);
     if (stored && publicThemes.some((item) => item.id === stored)) {
       return stored;
     }
@@ -35,6 +38,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     window.localStorage.setItem(storageKey, theme);
+    window.localStorage.removeItem(legacyStorageKey);
   }, [theme]);
 
   const value = useMemo(() => ({ theme, setTheme }), [theme]);

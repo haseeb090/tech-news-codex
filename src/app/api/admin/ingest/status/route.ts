@@ -14,7 +14,7 @@ export async function GET() {
   const session = await getServerSession(authOptions);
   if (!session?.user) {
     logWarn("Rejected admin status request due to missing session");
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
   }
 
   const data = await getAdminDashboardData();
@@ -42,5 +42,5 @@ export async function GET() {
       timelineEvents: data.timelineEvents.length,
     });
   }
-  return NextResponse.json(data);
+  return NextResponse.json(data, { headers: { "Cache-Control": "no-store" } });
 }

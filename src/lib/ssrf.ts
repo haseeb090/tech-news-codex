@@ -1,12 +1,7 @@
 import dns from "node:dns/promises";
 import net from "node:net";
 
-const blockedHostnames = new Set([
-  "localhost",
-  "127.0.0.1",
-  "0.0.0.0",
-  "::1",
-]);
+const blockedHostnames = new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1", "metadata.google.internal"]);
 
 const isPrivateIpv4 = (ip: string): boolean => {
   const [a, b] = ip.split(".").map((part) => Number.parseInt(part, 10));
@@ -19,9 +14,24 @@ const isPrivateIpv4 = (ip: string): boolean => {
   return false;
 };
 
+const isPrivateIpv4MappedIpv6 = (ip: string): boolean => {
+  if (!ip.startsWith("::ffff:")) {
+    return false;
+  }
+
+  const mapped = ip.slice("::ffff:".length);
+  return net.isIPv4(mapped) ? isPrivateIpv4(mapped) : false;
+};
+
 const isPrivateIpv6 = (ip: string): boolean => {
   const normalized = ip.toLowerCase();
-  return normalized === "::1" || normalized.startsWith("fc") || normalized.startsWith("fd") || normalized.startsWith("fe80");
+  return (
+    normalized === "::1" ||
+    normalized.startsWith("fc") ||
+    normalized.startsWith("fd") ||
+    normalized.startsWith("fe80") ||
+    isPrivateIpv4MappedIpv6(normalized)
+  );
 };
 
 const isPrivateIp = (ip: string): boolean => {
@@ -30,7 +40,7 @@ const isPrivateIp = (ip: string): boolean => {
   return true;
 };
 
-export const assertSafeRemoteUrl = async (url: string): Promise<void> => {
+const validateRemoteUrl = async (url: string): Promise<void> => {
   const parsed = new URL(url);
 
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
@@ -62,4 +72,12 @@ export const assertSafeRemoteUrl = async (url: string): Promise<void> => {
       throw new Error("Resolved to private IP target");
     }
   }
+};
+
+export const assertSafeRemoteUrl = validateRemoteUrl;
+
+export const resolveRedirectTarget = async (currentUrl: URL, location: string): Promise<URL> => {
+  const redirectTarget = new URL(location, currentUrl);
+  await validateRemoteUrl(redirectTarget.toString());
+  return redirectTarget;
 };

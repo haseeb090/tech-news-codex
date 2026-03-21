@@ -1,69 +1,230 @@
-# Tech Radar News
+# Rubix Signal
 
-Next.js monolith for free latest tech news. It ingests curated RSS feeds, extracts full article content with a LangGraph workflow plus Ollama fallback, stores canonical state in Turso/libSQL, and serves a lightweight frontend plus admin dashboard.
+Rubix Signal is a free tech-news briefing product for [Hirubix](https://www.hirubix.com), built to aggregate reporting from multiple sources, extract the core facts, and publish original, publication-safe summaries on `news.hirubix.com`.
 
-## Stack
+The app is a Next.js monolith with a LangGraph-driven ingestion pipeline, Ollama-backed rewriting, Turso/libSQL storage, a public reader experience, and an admin control room for ingestion visibility.
+
+## Vision
+
+- Make high-quality tech news easier to access for free.
+- Combine multiple trusted sources into one clean product.
+- Remove boilerplate, promo text, and ad residue from extracted content.
+- Publish summaries in original wording so the site does not depend on source phrasing.
+- Keep the pipeline observable, testable, and safe to operate.
+
+## Latest Product State
+
+This repository now includes the full merged work from the latest security, ingestion, and product-polish passes.
+
+### Security hardening
+
+- Production auth secret enforcement in `src/lib/config.ts`
+- Stronger signup validation and body-size checks in `src/app/api/public/auth/signup/route.ts`
+- Admin ingestion CSRF protection
+- SSRF hardening and redirect-safe remote fetch controls in `src/lib/ssrf.ts`
+- Tighter access control and rate-limit behavior for admin and reader auth flows
+- Updated security report in `security_best_practices_report.md`
+
+### LangGraph and ingestion improvements
+
+- Deterministic extraction cleanup improved to strip more promo, affiliate, and mojibake residue
+- Title-context extraction strengthened to better capture relevant article framing
+- Publication-safe rewrite stage added after extraction
+- Rewrites are validated against extracted content and full source text
+- Additional rewrite retries for stubborn title-originality failures
+- Distilled-facts fallback path for difficult articles
+- Source-aware policies for heavy or messy publishers
+- Newsworthiness filter to skip obvious evergreen guides, commerce roundups, and non-article media pages
+- Audit, backfill, and database reset scripts added for repeatable QA
+
+### Product and branding improvements
+
+- Rebranded public experience around Rubix Signal
+- Hirubix/Rubix footer presence with link back to the main company site
+- About page explaining the product goal
+- Better metadata, SEO, icons, and social previews
+- Accessibility polish including skip links, focus-visible treatment, dialog improvements, and reduced-motion support
+- Public feed and article pages polished to better match the new brand direction
+
+## Core Stack
+
 - Next.js 16 App Router
 - React 19
-- Auth: NextAuth Credentials
-- Database: Turso / libSQL via Drizzle
-- Orchestration: LangGraph for article extraction flow
-- Local model runtime: Ollama
-- Export artifacts: `public/news-latest.json` and `data/news-latest.csv`
+- NextAuth credentials auth
+- Turso / libSQL with Drizzle ORM
+- LangGraph for per-article orchestration
+- Ollama for local structured extraction fallback and summary rewriting
+- Export artifacts in `public/news-latest.json` and `data/news-latest.csv`
 
-## What the app does
-- Discovers links from curated RSS feeds
-- Deduplicates and tracks retries in Turso
-- Extracts article title/body/writer/date with deterministic parsing first
-- Falls back to Ollama only when needed
-- Validates extracted content against source text to reduce hallucinations
-- Stores articles, attempts, run history, pipeline events, and admin audit data in DB
-- Supports public reader signup/sign-in with secure email/password auth
-- Tracks reader signups in the database
-- Limits anonymous visitors to a five-article teaser feed
-- Keeps DB size bounded with FIFO-style pruning
+## What The App Does
 
-## Architecture
-- LangGraph handles per-article extraction orchestration in [`src/lib/ingestion/article-graph.ts`](./src/lib/ingestion/article-graph.ts)
-- App-level ingestion orchestration lives in [`src/lib/ingestion/run-ingestion.ts`](./src/lib/ingestion/run-ingestion.ts)
-- Canonical DB access and retention logic live in [`src/lib/db.ts`](./src/lib/db.ts)
-- Admin dashboard aggregation lives in [`src/lib/admin-dashboard.ts`](./src/lib/admin-dashboard.ts)
-- Reader auth modal and gated access logic live in [`src/components/reader-auth-provider.tsx`](./src/components/reader-auth-provider.tsx)
-- Public theme switching lives in [`src/components/theme-provider.tsx`](./src/components/theme-provider.tsx)
-- Source-specific retry and timeout behavior live in:
-  - [`src/lib/ingestion/source-policy.ts`](./src/lib/ingestion/source-policy.ts)
-  - [`src/lib/ingestion/retry-policy.ts`](./src/lib/ingestion/retry-policy.ts)
-  - [`src/lib/ingestion/failure-classification.ts`](./src/lib/ingestion/failure-classification.ts)
+- Pulls from curated RSS feeds
+- Deduplicates URLs and tracks retry state in the database
+- Filters out clearly non-news or non-article items before spending model budget
+- Extracts article title, context, body, writer, and publication date
+- Validates extracted content against source text
+- Rewrites accepted articles into original-language public summaries
+- Validates rewritten output for grounding, originality, and unsupported claims
+- Stores articles, attempts, run history, events, rate limits, and auth data
+- Exports a lightweight feed for the frontend
+- Exposes an admin dashboard for run status, event timelines, attempts, and failures
+
+## LangGraph Flow
+
+The per-article orchestration lives in `src/lib/ingestion/article-graph.ts`.
+
+### Graph stages
+
+1. `fetch`
+   Pulls the remote article HTML with source-aware timeout settings and SSRF protection.
+2. `diagnose`
+   Builds source text used for validation and records early diagnostics.
+3. `deterministic`
+   Runs the fast parser path first using Readability plus source-aware cleanup rules.
+4. `decideFallback`
+   Checks whether deterministic extraction is good enough or whether LLM fallback is required.
+5. `llmFallback`
+   Uses Ollama only when deterministic extraction is too weak.
+6. `validate`
+   Confirms the extracted article is grounded in the source page.
+7. `rewrite`
+   Produces a publication-safe summary in original wording.
+8. `classifyFailure`
+   Labels failures as transient or terminal for retry behavior and admin visibility.
+
+### Graph diagram
+
+```mermaid
+flowchart TD
+    A["Start"] --> B["Fetch HTML"]
+    B --> C["Diagnose Source Text"]
+    C --> D["Deterministic Extract"]
+    D --> E{"Pass Extraction Validation?"}
+    E -- "Yes" --> F["Validate Extracted Article"]
+    E -- "No" --> G["LLM Fallback Extract"]
+    G --> F
+    F --> H{"Valid?"}
+    H -- "No" --> I["Classify Failure"]
+    H -- "Yes" --> J["Rewrite For Publication-Safe Summary"]
+    J --> K{"Rewrite Valid?"}
+    K -- "No" --> I
+    K -- "Yes" --> L["Persist Article + Export Feed"]
+```
+
+### Rewrite and copyright-safety layer
+
+The rewrite stage is implemented in `src/lib/ingestion/rewrite-article.ts` and validated in `src/lib/ingestion/rewrite-validation.ts`.
+
+It is designed to:
+
+- keep facts grounded in the source article
+- avoid direct reuse of source wording
+- remove ad text, affiliate language, newsletters, and promo residue
+- preserve important caveats and time windows
+- reject unsupported numbers, unsupported uncertainty claims, and unsupported time-window expansions
+- retry titles separately when the body is sound but the headline is too close to the source
+
+### Source-aware ingestion policy
+
+Source policy settings live in `src/lib/ingestion/source-policy.ts`.
+
+These tune:
+
+- fetch timeouts
+- processing budgets
+- LLM HTML truncation size
+- retry budgets and cooldowns
+- source-specific fallback behavior
+
+### Newsworthiness filter
+
+Pre-ingestion filtering now lives in `src/lib/ingestion/newsworthiness.ts`.
+
+Current rules skip:
+
+- obvious guides / how-to content
+- review-style evergreen pages
+- consumer-commerce roundup pages
+- non-article media pages such as `/video/`
+
+## Ingestion Lifecycle
+
+App-level orchestration lives in `src/lib/ingestion/run-ingestion.ts`.
+
+### End-to-end pipeline
+
+1. Fetch feed entries from the curated catalog
+2. Normalize and deduplicate URLs
+3. Filter out non-news items
+4. Queue eligible links
+5. Process each article through the LangGraph flow
+6. Persist successful rewritten articles
+7. Record attempts and event logs
+8. Export JSON and CSV artifacts for the frontend
+
+### Observability
+
+The admin dashboard acts as a lightweight ingestion control room and surfaces:
+
+- active run status
+- last completed run
+- run timeline and feed discovery events
+- article-level attempts
+- failed links with retry classification
+- LangGraph node-level event telemetry
+- reader signup stats
+
+## Repository Highlights
+
+- `src/lib/ingestion/article-graph.ts`: per-article LangGraph workflow
+- `src/lib/ingestion/run-ingestion.ts`: feed discovery and run orchestration
+- `src/lib/ingestion/deterministic-extract.ts`: deterministic extraction and cleanup
+- `src/lib/ingestion/llm-extract.ts`: structured fallback extraction
+- `src/lib/ingestion/rewrite-article.ts`: publication-safe rewrite stage
+- `src/lib/ingestion/rewrite-validation.ts`: rewrite originality and grounding checks
+- `src/lib/ingestion/newsworthiness.ts`: pre-ingestion filtering
+- `src/lib/db.ts`: canonical DB access and retention logic
+- `src/app/about/page.tsx`: about page for the product mission
+- `src/components/site-footer.tsx`: Hirubix-linked footer content
+- `security_best_practices_report.md`: security review notes
 
 ## Requirements
+
 - Node.js `22.17.1` recommended
-  - Node `20.19+` is also fine
 - Ollama running locally
-- `qwen3:8b` pulled locally
-- Turso database URL and auth token
+- `qwen3:8b` available in Ollama
+- Turso/libSQL database credentials
 
-## Local setup
-1. Install dependencies:
-   ```powershell
-   npm install
-   ```
-2. Create `.env.local` from `.env.example` if needed:
-   ```powershell
-   Copy-Item .env.example .env.local
-   ```
-3. Generate an admin password hash if you need one:
-   ```powershell
-   npm run admin:hash -- your-strong-password
-   ```
-4. Fill `.env.local`.
+## Local Setup
 
-## Required `.env.local`
+1. Install dependencies
+
+```powershell
+npm install
+```
+
+2. Create local env file
+
+```powershell
+Copy-Item .env.example .env.local
+```
+
+3. Generate an admin password hash if needed
+
+```powershell
+npm run admin:hash -- your-strong-password
+```
+
+4. Fill in `.env.local`
+
+## Required Environment Variables
+
 ```env
 AUTH_SECRET=replace-with-random-long-secret
 NEXTAUTH_SECRET=replace-with-random-long-secret
 NEXTAUTH_URL=http://localhost:3000
 
-ADMIN_USERNAME=haseeb090
+ADMIN_USERNAME=admin
 ADMIN_PASSWORD_HASH=your-argon2-hash
 ADMIN_ENABLED=true
 ADMIN_LOCAL_ONLY=true
@@ -73,6 +234,7 @@ DATABASE_AUTH_TOKEN=your-turso-auth-token
 
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=qwen3:8b
+
 PUBLIC_SIGNUP_ENABLED=true
 RATE_LIMIT_ENABLED=true
 READER_LOGIN_RATE_LIMIT_ATTEMPTS=15
@@ -81,12 +243,12 @@ READER_SIGNUP_RATE_LIMIT_ATTEMPTS=10
 READER_SIGNUP_RATE_LIMIT_WINDOW_MINUTES=60
 ADMIN_TRIGGER_RATE_LIMIT_ATTEMPTS=10
 ADMIN_TRIGGER_RATE_LIMIT_WINDOW_MINUTES=1
+
 PREVIEW_ARTICLE_COUNT=5
 VIEW_MORE_INCREMENT=6
 ```
 
-## Useful optional `.env.local`
-These are already supported by the app:
+## Useful Optional Environment Variables
 
 ```env
 RSS_FEEDS=
@@ -101,12 +263,7 @@ USE_LLM_FALLBACK=true
 ARTICLE_FETCH_TIMEOUT_MS=20000
 ARTICLE_PROCESS_TIMEOUT_MS=60000
 LLM_HTML_MAX_CHARS=45000
-```
 
-## Storage retention env vars
-These keep Turso storage bounded over time:
-
-```env
 ARTICLE_RECORD_LIMIT=500
 ARTICLE_PRUNE_COUNT=100
 ARTICLE_LINK_RECORD_LIMIT=650
@@ -121,119 +278,123 @@ LOGIN_AUDIT_RECORD_LIMIT=500
 LOGIN_AUDIT_PRUNE_COUNT=100
 ```
 
-## One-time DB setup
+## Database Setup
+
 Push the schema to Turso:
 
 ```powershell
 npm run db:push -- --force
 ```
 
-## Verify Ollama
-Make sure Ollama is running and the model exists:
+## Running Locally
 
-```powershell
-ollama list
-```
-
-## Running locally
-Start the frontend:
+Frontend:
 
 ```powershell
 npm run dev
 ```
 
-Then open:
-- Feed: [http://localhost:3000](http://localhost:3000)
-- Login: [http://localhost:3000/login](http://localhost:3000/login)
-- Admin: [http://localhost:3000/admin](http://localhost:3000/admin)
-
-Admin login uses:
-- username: whatever `ADMIN_USERNAME` is set to
-- password: the plain password behind `ADMIN_PASSWORD_HASH`
-
-## Public reader auth flow
-- Anonymous visitors can preview the first `PREVIEW_ARTICLE_COUNT` articles on the homepage.
-- Clicking `Read here`, `Source`, or `View more` opens a signup/sign-in modal.
-- Reader sessions use NextAuth credentials with email/password.
-- Direct requests to `/articles/[id]` redirect back to the homepage with an auth prompt unless the visitor is signed in.
-- Signups are tracked in `reader_users` and `reader_signup_events`.
-
-## Running ingestion locally
-One ingestion run:
-
-```powershell
-npm run ingest
-```
-
-Start frontend after a one-shot ingest:
+One ingest, then frontend:
 
 ```powershell
 npm run dev:with-ingest
 ```
 
-Continuous worker loop:
+Worker loop:
 
 ```powershell
 npm run worker
 ```
 
-Rebuild exported artifacts from DB:
+Useful local routes:
+
+- Feed: [http://localhost:3000](http://localhost:3000)
+- Login: [http://localhost:3000/login](http://localhost:3000/login)
+- Admin: [http://localhost:3000/admin](http://localhost:3000/admin)
+
+## Auth Model
+
+### Admin auth
+
+- Protected by NextAuth credentials auth and middleware
+- Can be disabled with `ADMIN_ENABLED=false`
+- Can be restricted to localhost with `ADMIN_LOCAL_ONLY=true`
+- Manual admin ingestion is CSRF-protected
+
+### Reader auth
+
+- Readers can sign up with email/password
+- Passwords are stored as Argon2 hashes
+- Signup and login are rate-limited in production
+- Anonymous visitors get only a teaser feed
+- Full article access is gated behind reader auth
+
+## Quality Assurance Workflow
+
+The repository now includes explicit scripts for validating ingestion quality against source pages.
+
+### Fresh validation flow
 
 ```powershell
-npm run export:news
+npm run db:reset
+npm run ingest
+npm run audit:latest -- 25
 ```
 
-## Triggering ingestion from the admin UI
-1. Start the app locally with `npm run dev`
-2. Log in at `/login`
-3. Open `/admin`
-4. Click `Run Ingestion Now`
+### What the QA scripts do
 
-Because local dev can reach local Ollama at `http://127.0.0.1:11434`, this works fine on your machine.
+- `db:reset`
+  Clears app tables and resets exported feed artifacts
+- `audit:latest`
+  Re-fetches the newest stored articles, re-extracts source text, reruns rewrite validation, and asks the model for a factual/coverage verdict
+- `backfill:rewrite`
+  Reprocesses the latest stored articles under the latest rewrite rules
 
-## Local Docker stack
-This repo now includes a local Docker runtime for a persistent app server plus a scheduled ingestion worker.
+This makes it easy to test whether the public summaries still match the underlying article facts after pipeline changes.
+
+## Commands
+
+- `npm run dev`: start frontend
+- `npm run dev:with-ingest`: ingest once, then start frontend
+- `npm run ingest`: run one ingestion pass
+- `npm run worker`: run the scheduled worker loop
+- `npm run export:news`: rebuild JSON and CSV exports from DB
+- `npm run backfill:rewrite`: reprocess latest stored articles through the rewrite layer
+- `npm run audit:latest -- <n>`: audit the latest `n` stored articles against source content
+- `npm run db:reset`: clear DB content and reset exports
+- `npm run feeds:check`: validate curated feeds
+- `npm run admin:hash -- <password>`: generate admin password hash
+- `npm run admin:set-password -- <password> [--username=admin]`: update local admin credentials
+- `npm run db:generate`: generate Drizzle migration files
+- `npm run db:push`: push schema to Turso
+- `npm run db:studio`: open Drizzle Studio
+- `npm run test`: run tests
+- `npm run lint`: run ESLint
+- `npm run build`: production build check
+
+## Docker
+
+The repo includes a local Docker stack for an always-on app plus a scheduled worker.
 
 Files:
-- [`Dockerfile`](./Dockerfile)
-- [`docker-compose.yml`](./docker-compose.yml)
-- [`.dockerignore`](./.dockerignore)
 
-What the compose stack does:
-- runs the app server continuously
-- binds the app to `127.0.0.1:3000` so the admin interface stays local-only
-- runs a separate worker container that checks for ingestion every 3 hours
-- uses `restart: unless-stopped` so the services come back when Docker restarts
-- reaches your local Ollama instance through `http://host.docker.internal:11434`
+- `Dockerfile`
+- `docker-compose.yml`
+- `.dockerignore`
 
-Start it:
+Start:
 
 ```powershell
 docker compose up -d --build
 ```
 
-Stop it:
+Stop:
 
 ```powershell
 docker compose down
 ```
 
-The worker service uses:
-- `WORKER_INTERVAL_MINUTES=180`
-- `WORKER_ALIGN_TO_INTERVAL=true`
-- `WORKER_RUN_ON_START=true`
-
-That means it runs one ingestion on container start, then waits for the next aligned 3-hour window.
-
-Important:
-- the Docker stack mounts your local `.env.local`
-- the Compose file overrides a few runtime values for containers:
-  - app binds to `http://localhost:3000`
-  - admin stays local-only
-  - Ollama is reached through `http://host.docker.internal:11434`
-  - worker runs every 3 hours even if your local `.env.local` says something else
-
-Useful Docker logs:
+Logs:
 
 ```powershell
 docker compose logs -f app
@@ -241,217 +402,56 @@ docker compose logs -f worker
 docker compose logs -f app worker
 ```
 
-Log routing:
-- manual ingestion started from the admin UI logs in the `app` container
-- scheduled ingestion logs in the `worker` container
-- auth and admin API logs also show in the `app` container
+## Curated Feeds
 
-## Admin observability
-The admin dashboard is now meant to work like a lightweight ingestion control room.
+- Default feed catalog: `src/lib/ingestion/feeds.json`
+- Leave `RSS_FEEDS` blank to use the curated default catalog
+- Or provide a comma-separated override list
 
-It shows:
-- `Active Run` with live progress and current item context
-- `Last Completed Run` that stays visible while a new run is in progress
-- `Reader Signups` and `Recent Signups`
-- `Pipeline Timeline` for feed discovery, queueing, export, and run lifecycle events
-- `LangGraph Orchestration` with a per-link node-flow diagram:
-  - `Fetch -> Diagnose -> Deterministic -> Decision -> LLM -> Validate -> Classify -> Result`
-- `Current Run Attempts` for article-level results in the active run only
-- `Recent Attempts` for cross-run history
-- `Failed Links` with transient vs terminal retry classification
+## Security Notes
 
-The timeline and graph board are backed by the `ingest_events` table, and the event stream is emitted from both the ingestion runner and the LangGraph workflow.
-The admin trigger button is disabled while a run is already active, so you do not get a misleading manual-trigger error when a scheduled run is in progress.
-
-## Console logging
-Local ingestion now emits timestamped stage-aware logs in the terminal and Docker logs.
-
-Examples include:
-- feed discovery start/success/failure
-- per-link orchestration start
-- LangGraph node events like `graph.fetch`, `graph.diagnose`, `graph.decision`, `graph.llm`, `graph.validate`
-- link success/failure
-- artifact export start/completion
-- final run completion/failure
-
-Run one manual ingestion and watch the console:
-
-```powershell
-npm run ingest
-```
-
-For the local Docker stack:
-
-```powershell
-docker compose logs -f app worker
-```
-
-## Stale `next dev` cleanup on PowerShell
-If `npm run dev` says port `3000` is in use or `.next/dev/lock` is already held, use these:
-
-Show Node processes:
-
-```powershell
-Get-Process node -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,StartTime,Path
-```
-
-Show command lines for Node processes:
-
-```powershell
-Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'node.exe' } | Select-Object ProcessId,CommandLine
-```
-
-Stop a specific stale process:
-
-```powershell
-Stop-Process -Id 12345 -Force
-```
-
-If you clearly see stale `npm run dev` / `next dev` processes for this workspace, stop them:
-
-```powershell
-Stop-Process -Id 56500,36276,14516 -Force
-```
-
-Then start dev again:
-
-```powershell
-npm run dev
-```
-
-## Commands
-- `npm run dev`: start frontend
-- `npm run dev:with-ingest`: ingest once, then start frontend
-- `npm run ingest`: one ingestion run
-- `npm run worker`: continuous local worker loop
-- `npm run export:news`: rebuild JSON/CSV artifacts
-- `npm run feeds:check`: validate curated feeds
-- `npm run admin:hash -- <password>`: generate admin password hash
-- `npm run admin:set-password -- <password> [--username=haseeb090]`: update `.env.local` with a new admin hash and clear admin rate-limit locks
-- `npm run db:generate`: generate Drizzle migration SQL
-- `npm run db:push`: push schema to Turso
-- `npm run db:studio`: open Drizzle Studio
-- `npm run test`: run tests
-- `npm run lint`: run lint
-- `npm run build`: production build check
-
-## Curated feeds
-- Default feed catalog lives in [`src/lib/ingestion/feeds.json`](./src/lib/ingestion/feeds.json)
-- Leave `RSS_FEEDS` blank to use the curated catalog
-- Or override with comma-separated feed URLs
-
-## Storage retention
-The DB uses FIFO-style pruning so free-tier storage does not grow forever.
-
-Current defaults:
-- `ARTICLE_RECORD_LIMIT=500`
-- `ARTICLE_LINK_RECORD_LIMIT=650`
-- `INGEST_RUN_RECORD_LIMIT=200`
-- `INGEST_ATTEMPT_RECORD_LIMIT=1200`
-- `INGEST_EVENT_RECORD_LIMIT=5000`
-- `LOGIN_AUDIT_RECORD_LIMIT=500`
-
-Pruning happens before inserts in [`src/lib/db.ts`](./src/lib/db.ts).
-
-## Source-specific behavior
-- Slow or thin-content sources use source policies
-- Retry classification is `transient` vs `terminal`
-- Admin dashboard shows retry classification hints
-- BleepingComputer and Engadget have source-aware behavior
-
-## Security notes
-- Admin pages and APIs are protected by NextAuth middleware
-- Passwords are stored as Argon2 hashes in env vars
-- Reader passwords are stored as Argon2 hashes in the database
+- Admin and reader passwords use Argon2 hashes
 - Login attempts are audited
-- SSRF guard blocks local/private network targets
-- Extraction is validated against source text
-- Admin routes can be disabled with `ADMIN_ENABLED=false`
-- Admin routes can be restricted to localhost with `ADMIN_LOCAL_ONLY=true`
+- SSRF protections block local/private network fetch targets
+- Signup and login rate limiting is narrow by design
+- Extraction and rewritten output are both validated against source material
+- Production auth secret configuration is enforced
+- Sensitive admin flows are designed for local/private operation by default
 
-## Rate limiting
-The app keeps rate limiting intentionally narrow so it does not hurt normal UX.
+## Deploying
 
-What is not rate-limited:
-- `GET /api/news`
-- public feed reads and article reads
-- admin status polling
-- admin timeline/log polling
-- local admin login
-- local admin manual ingestion trigger
-- local signup and local reader login
+For public hosting, the recommended posture is:
 
-What is rate-limited in production:
-- public reader signup
-- public reader login
-- remote admin manual ingestion trigger, if you ever expose admin remotely
+- keep the public site deployed
+- keep admin disabled or strictly private
+- run ingestion from a trusted environment that can reach Ollama
 
-Current production behavior:
-- signup is limited by `email + IP`
-- reader login is limited by `email + IP`
-- admin trigger is limited by `user + IP`
+Typical production env highlights:
 
-Practical meaning:
-- many different users from the same network can still sign up and log in
-- repeated abuse from the same email/IP pair gets slowed down
-- admin status polling never consumes trigger budget
-- read APIs stay fast and unthrottled
+```env
+DATABASE_URL=libsql://your-db-name.turso.io
+DATABASE_AUTH_TOKEN=your-turso-auth-token
+NEXTAUTH_SECRET=replace-with-random-long-secret
+NEXTAUTH_URL=https://news.hirubix.com
+PUBLIC_SIGNUP_ENABLED=true
+RATE_LIMIT_ENABLED=true
+ADMIN_ENABLED=false
+ADMIN_LOCAL_ONLY=true
+OLLAMA_BASE_URL=http://your-reachable-ollama-host:11434
+OLLAMA_MODEL=qwen3:8b
+```
 
-## Windows Task Scheduler
-To run ingestion every hour from your PC:
-1. Open Task Scheduler
-2. Create Basic Task
-3. Trigger: Daily, repeat every `1 hour`
-4. Action: Start a program
-5. Program/script: `npm`
-6. Arguments: `run ingest`
-7. Start in: `E:\Code\Codex-projects\nextjs tech news`
+If your hosted environment cannot safely reach Ollama, keep admin ingestion disabled there and run ingestion from your controlled machine or worker environment instead.
 
-## Vercel + Turso deploy
-1. Create Turso DB and auth token
-2. Add env vars in Vercel:
-   ```env
-   DATABASE_URL=libsql://your-db-name.turso.io
-   DATABASE_AUTH_TOKEN=your-turso-auth-token
-   NEXTAUTH_SECRET=replace-with-random-long-secret
-   NEXTAUTH_URL=https://your-domain.vercel.app
-   ADMIN_USERNAME=haseeb090
-   ADMIN_PASSWORD_HASH=your-argon2-hash
-   ADMIN_ENABLED=false
-   ADMIN_LOCAL_ONLY=true
-   PUBLIC_SIGNUP_ENABLED=true
-   RATE_LIMIT_ENABLED=true
-   READER_LOGIN_RATE_LIMIT_ATTEMPTS=15
-   READER_LOGIN_RATE_LIMIT_WINDOW_MINUTES=15
-   READER_SIGNUP_RATE_LIMIT_ATTEMPTS=10
-   READER_SIGNUP_RATE_LIMIT_WINDOW_MINUTES=60
-   ADMIN_TRIGGER_RATE_LIMIT_ATTEMPTS=10
-   ADMIN_TRIGGER_RATE_LIMIT_WINDOW_MINUTES=1
-   PREVIEW_ARTICLE_COUNT=5
-   VIEW_MORE_INCREMENT=6
-   OLLAMA_BASE_URL=http://your-pc-or-reachable-ollama-endpoint:11434
-   OLLAMA_MODEL=qwen3:8b
-   ```
-3. Push schema once from local machine:
-   ```powershell
-   npm run db:push -- --force
-   ```
-4. Deploy to Vercel
-5. Run ingestion from your PC with `npm run ingest` or `npm run worker`
+## Current Status Summary
 
-Important:
-- if production `OLLAMA_BASE_URL` still points to `127.0.0.1`, the hosted admin ingestion endpoint will reject the request by design
-- in that case, run ingestion from your local machine instead
-- for the public deployed site, set `ADMIN_ENABLED=false` so the admin surface is not exposed at all
-- with `ADMIN_ENABLED=false`, public reader signup/login continues to work and does not depend on the local admin system
+The project now ships with:
 
-## Current project state
-- Turso-backed canonical DB
-- LangGraph-based extraction flow
-- adaptive retries and per-source policies
-- bounded DB retention
-- event-backed admin dashboard with live status, timeline logging, LangGraph node-flow monitoring, failed links, attempts, and retry classification
-- local Docker stack for always-on local admin and scheduled ingestion
-- public reader auth with signup tracking and gated full-feed access
-- multi-theme public UI with smoother motion and theme switching
-- public feed plus article detail pages
+- Hirubix-aware branding and footer integration
+- an About page explaining the product goal
+- a LangGraph-first ingestion pipeline with deterministic extraction, fallback extraction, validation, and publication-safe rewriting
+- source-aware cleanup and retry policy
+- newsworthiness filtering before model spend
+- admin observability for article-graph events and run telemetry
+- security hardening across auth, admin triggers, signup handling, and SSRF protection
+- repeatable reset, backfill, and audit scripts for end-to-end validation

@@ -10,6 +10,15 @@ const BOILERPLATE_PATTERNS = [
   /cookie policy/i,
   /show comments/i,
   /follow us/i,
+  /if you buy something/i,
+  /may earn a commission/i,
+  /advertiser content/i,
+  /register now/i,
+  /most popular/i,
+  /view bio/i,
+  /related (stories|articles|coverage)/i,
+  /top stories/i,
+  /sponsored/i,
 ];
 
 const normalize = (value: string): string => value.toLowerCase().replace(/\s+/g, " ").trim();

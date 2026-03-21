@@ -15,9 +15,12 @@
     "docker:app": "tsx src/scripts/docker-run.ts app",
     "docker:worker": "tsx src/scripts/docker-run.ts worker",
     "export:news": "tsx src/scripts/export-news.ts",
+    "backfill:rewrite": "tsx src/scripts/backfill-rewrites.ts",
+    "audit:latest": "tsx src/scripts/audit-latest.ts",
     "admin:hash": "tsx src/scripts/hash-admin-password.ts",
     "admin:set-password": "tsx src/scripts/set-admin-password.ts",
     "feeds:check": "tsx src/scripts/check-feeds.ts",
+    "db:reset": "tsx src/scripts/reset-db.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"

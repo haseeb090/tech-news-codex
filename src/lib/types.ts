@@ -33,6 +33,14 @@ export interface ExtractedArticle {
   body: string;
   writer: string | null;
   publishedAt: string | null;
+  context?: string | null;
+}
+
+export interface PreparedArticle {
+  title: string;
+  body: string;
+  writer: string | null;
+  publishedAt: string | null;
 }
 
 export interface IngestionRunSummary {

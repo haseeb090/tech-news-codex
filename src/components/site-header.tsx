@@ -17,16 +17,19 @@ export function SiteHeader({ adminEnabled }: { adminEnabled: boolean }) {
 
   return (
     <header className="shell-chrome glass-orbit mb-10 flex flex-wrap items-center justify-between gap-4 rounded-[1.8rem] border px-5 py-3 shadow-[0_18px_60px_rgba(15,23,42,0.45)] backdrop-blur-xl">
-      <div className="flex items-center gap-6">
-        <Link href="/" aria-label="Tech Radar News home">
+      <div className="flex flex-wrap items-center gap-6">
+        <Link href="/" aria-label="Rubix Signal home">
           <BrandMark compact />
         </Link>
-        <nav className="flex items-center gap-4 text-sm font-semibold text-slate-300">
+        <nav aria-label="Primary" className="flex flex-wrap items-center gap-4 text-sm font-semibold text-slate-300">
           <Link href="/" className="hover:text-cyan-300">
             Feed
           </Link>
           <Link href="/about" className="hover:text-cyan-300">
             About
+          </Link>
+          <Link href="https://www.hirubix.com/" target="_blank" rel="noreferrer" className="hover:text-cyan-300">
+            Hirubix
           </Link>
           {adminEnabled && role === "admin" ? (
             <Link href="/admin" className="hover:text-fuchsia-300">
@@ -79,7 +82,7 @@ export function SiteHeader({ adminEnabled }: { adminEnabled: boolean }) {
               onClick={() => openReaderAuth({ mode: "signup" })}
               className="rounded-xl bg-gradient-to-r from-fuchsia-500 via-violet-500 to-cyan-400 px-4 py-2 text-sm font-semibold text-white"
             >
-              Unlock full feed
+              Unlock full briefings
             </button>
           </>
         )}

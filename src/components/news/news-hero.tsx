@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 interface NewsHeroProps {
   articleCount: number;
   sourceCount: number;
@@ -20,20 +22,37 @@ export function NewsHero({ articleCount, sourceCount, generatedAt }: NewsHeroPro
 
       <div className="relative z-10 space-y-6">
         <p className="hero-chip inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-slate-600 shadow-[0_10px_30px_rgba(255,255,255,0.35)]">
-          AI-Curated Tech Radar
+          Rubix Labs x Hirubix News Desk
         </p>
 
         <h1 className="hero-title max-w-4xl text-4xl font-black leading-[0.95] md:text-7xl">
-          Real tech news, extracted with grounded agents.
+          Free tech briefings, rewritten from the source.
         </h1>
 
         <p className="hero-subtitle max-w-2xl text-base leading-7 md:text-xl">
-          This feed blends deterministic parsing with LangGraph + Ollama fallback validation to reduce hallucinations and keep article facts grounded in source text.
+          Rubix Signal combines multiple publishers, agentic extraction, and grounded rewrites to produce original briefings that stay faithful to the facts without mirroring the article text.
         </p>
+
+        <div className="flex flex-wrap gap-3">
+          <Link
+            href="/about"
+            className="ripple-action rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-[0_18px_60px_rgba(15,23,42,0.18)]"
+          >
+            How it works
+          </Link>
+          <Link
+            href="https://www.hirubix.com/"
+            target="_blank"
+            rel="noreferrer"
+            className="ripple-action rounded-full border border-slate-300 bg-white/80 px-5 py-3 text-sm font-semibold text-slate-800"
+          >
+            Meet Hirubix
+          </Link>
+        </div>
 
         <div className="grid gap-3 text-sm text-slate-700 md:grid-cols-3">
           <div className="hero-stat rounded-2xl border border-slate-200 p-4 shadow-[0_20px_50px_rgba(15,23,42,0.08)]">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Articles</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Briefings</p>
             <p className="mt-2 text-2xl font-bold text-slate-900">{articleCount}</p>
           </div>
           <div className="hero-stat rounded-2xl border border-slate-200 p-4 shadow-[0_20px_50px_rgba(15,23,42,0.08)]">

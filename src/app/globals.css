@@ -271,6 +271,14 @@ select {
     transform 160ms ease;
 }
 
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--theme-accent) 82%, white 18%);
+  outline-offset: 3px;
+}
+
 .shell-chrome {
   border-color: var(--theme-shell-border);
   background: var(--theme-shell-bg);
@@ -635,5 +643,26 @@ select {
   }
   100% {
     transform: translateX(160%) rotate(8deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .interactive-card:hover {
+    transform: none;
+  }
+
+  .news-card-reveal {
+    opacity: 1;
+    transform: none;
+    animation: none;
   }
 }

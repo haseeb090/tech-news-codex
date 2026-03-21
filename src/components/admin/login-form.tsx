@@ -35,8 +35,11 @@ export function LoginForm() {
       onSubmit={onSubmit}
       className="space-y-4 rounded-3xl border border-fuchsia-300/20 bg-slate-950/75 p-8 text-slate-100 shadow-[0_25px_80px_rgba(15,23,42,0.45)] backdrop-blur-xl"
     >
+      <p className="inline-flex rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200">
+        Rubix Signal Admin
+      </p>
       <h1 className="text-2xl font-bold text-white">Admin Login</h1>
-      <p className="text-sm text-slate-300">Sign in to run ingestion jobs and inspect failures.</p>
+      <p className="text-sm text-slate-300">Sign in to run ingestion jobs, inspect failures, and monitor the rewrite pipeline.</p>
 
       <label className="block space-y-2 text-sm">
         <span className="font-semibold text-slate-200">Username</span>

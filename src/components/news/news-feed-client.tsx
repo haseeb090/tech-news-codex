@@ -61,7 +61,7 @@ export function NewsFeedClient({
     if (query.trim()) values.push(`query "${query.trim()}"`);
     if (selectedSource !== "all") values.push(selectedSource);
     if (selectedTopic !== "all") values.push(topics.find((topic) => topic.id === selectedTopic)?.label || selectedTopic);
-    return values.join(" • ");
+    return values.join(" / ");
   }, [query, selectedSource, selectedTopic, topics]);
 
   useEffect(() => {
@@ -240,13 +240,13 @@ export function NewsFeedClient({
   };
 
   return (
-    <section className="space-y-8">
+    <section className="space-y-8" aria-busy={loading}>
       <div className="feed-panel glass-orbit grid gap-4 rounded-3xl border p-4 backdrop-blur md:grid-cols-[1.2fr_0.7fr_0.7fr_0.6fr]">
         <label className="flex flex-col gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">
           Search
           <input
             className="feed-input rounded-xl border border-white/10 px-4 py-3 text-sm outline-none ring-fuchsia-400 transition focus:ring-2"
-            placeholder="Search headlines, excerpts, reporters, companies..."
+            placeholder="Search headlines, briefings, reporters, companies..."
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -304,7 +304,7 @@ export function NewsFeedClient({
             Showing {visibleArticles.length} of {filteredTotal} matching articles
           </p>
           <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">
-            {activeFilterSummary ? `${activeFilterSummary} • ` : ""}
+            {activeFilterSummary ? `${activeFilterSummary} / ` : ""}
             {totalArticlesInDb} total articles in the database
           </p>
         </div>
@@ -327,7 +327,9 @@ export function NewsFeedClient({
       </div>
 
       {loading ? (
-        <div className="feed-panel rounded-3xl border p-10 text-center text-sm text-slate-200">Refreshing the live feed...</div>
+        <div className="feed-panel rounded-3xl border p-10 text-center text-sm text-slate-200" role="status" aria-live="polite">
+          Refreshing the live feed...
+        </div>
       ) : null}
 
       {filteredTotal === 0 && !loading ? (
@@ -340,7 +342,7 @@ export function NewsFeedClient({
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-cyan-300/20 bg-cyan-400/10 px-5 py-4 text-sm text-cyan-100">
               <div>
                 <p className="font-semibold uppercase tracking-[0.16em] text-cyan-200">Free preview active</p>
-                <p className="mt-1 text-cyan-50">Explore the first five articles, then unlock the full live feed with a free email signup.</p>
+                <p className="mt-1 text-cyan-50">Explore the first five rewritten briefings, then unlock the full live feed with a free email signup.</p>
               </div>
               <button
                 type="button"
@@ -414,24 +416,25 @@ export function NewsFeedClient({
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-200">Full feed locked</p>
               <h3 className="mt-3 text-2xl font-black text-white">The full archive scrolls infinitely once you unlock it.</h3>
               <p className="mt-3 text-sm leading-7 text-slate-200">
-                Free members get article pages, deeper discovery filters, and the full rolling database instead of the five-card preview.
+                Free members get the full archive of Rubix briefings, deeper discovery filters, and article detail pages instead of the five-card preview.
               </p>
               <button
                 type="button"
                 onClick={() => openReaderAuth({ mode: "signup" })}
                 className="mt-5 rounded-2xl bg-gradient-to-r from-fuchsia-500 via-violet-500 to-cyan-400 px-6 py-3 text-sm font-semibold text-white shadow-[0_18px_60px_rgba(8,145,178,0.28)]"
               >
-                Unlock full feed
+                Unlock full briefings
               </button>
             </div>
           ) : null}
 
           <div className="rounded-3xl border border-white/10 bg-white/5 px-5 py-4 text-sm leading-6 text-slate-300">
-            Headlines and short source-grounded excerpts are shown for discovery. Open the original publisher for the complete
-            article, full context, and full copyright attribution.
+            Every card links to a Rubix-written briefing grounded in the source story. Open the original publisher for the
+            full article, exact wording, and complete copyright attribution.
           </div>
         </>
       )}
     </section>
   );
 }
+

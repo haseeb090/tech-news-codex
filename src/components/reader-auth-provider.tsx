@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, FormEvent, useCallback, useContext, useMemo, useRef, useState } from "react";
+import { createContext, FormEvent, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { signIn, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
@@ -42,6 +42,28 @@ function ReaderAuthModal({
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose, open]);
+
+  const titleId = "reader-auth-title";
+  const descriptionId = "reader-auth-description";
 
   if (!open) return null;
 
@@ -111,11 +133,22 @@ function ReaderAuthModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 py-8 backdrop-blur-md">
-      <div className="glass-orbit relative w-full max-w-lg overflow-hidden rounded-[2rem] border border-fuchsia-300/20 bg-slate-950/90 p-8 text-slate-100 shadow-[0_40px_140px_rgba(15,23,42,0.55)]">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 py-8 backdrop-blur-md"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        onClick={(event) => event.stopPropagation()}
+        className="glass-orbit relative w-full max-w-lg overflow-hidden rounded-[2rem] border border-fuchsia-300/20 bg-slate-950/90 p-8 text-slate-100 shadow-[0_40px_140px_rgba(15,23,42,0.55)]"
+      >
         <button
           type="button"
           onClick={onClose}
+          aria-label="Close reader access dialog"
           className="absolute right-5 top-5 rounded-full border border-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-300 hover:border-cyan-300 hover:text-cyan-200"
         >
           Close
@@ -125,11 +158,13 @@ function ReaderAuthModal({
           <p className="inline-flex rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">
             Reader Access
           </p>
-          <h2 className="text-3xl font-bold text-white">{mode === "signup" ? "Unlock the full feed" : "Welcome back"}</h2>
-          <p className="text-sm leading-6 text-slate-300">
+          <h2 id={titleId} className="text-3xl font-bold text-white">
+            {mode === "signup" ? "Unlock the full briefings" : "Welcome back"}
+          </h2>
+          <p id={descriptionId} className="text-sm leading-6 text-slate-300">
             {mode === "signup"
-              ? "Create a free account to open articles, reveal the full feed, and keep coming back for the latest tech coverage."
-              : "Sign in to continue exploring the full feed and open article details."}
+              ? "Create a free account to open article pages, reveal the full briefing archive, and keep coming back for the latest tech coverage."
+              : "Sign in to continue exploring the full briefing archive and open article details."}
           </p>
         </div>
 
@@ -159,6 +194,7 @@ function ReaderAuthModal({
               onChange={(event) => setEmail(event.target.value)}
               className="w-full rounded-xl border border-white/10 bg-white/95 px-4 py-3 text-slate-900"
               placeholder="you@example.com"
+              autoFocus
               required
             />
           </label>

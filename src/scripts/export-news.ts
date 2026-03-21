@@ -1,3 +1,5 @@
+import "@/lib/load-env";
+
 import { exportNewsArtifacts } from "@/lib/export-news";
 
 const run = async () => {

@@ -91,7 +91,7 @@ export function ArticleCard({
 
       <div className="mt-auto pt-6">
         <p className="text-sm text-slate-500">{article.writer ? `By ${article.writer}` : "Writer unavailable"}</p>
-        <p className="mt-2 text-xs uppercase tracking-[0.18em] text-slate-400">Short attributed excerpt</p>
+        <p className="mt-2 text-xs uppercase tracking-[0.18em] text-slate-400">Original rewritten briefing</p>
         <div className="mt-3 flex items-center gap-4">
           <Link
             href={`/articles/${article.id}`}
@@ -107,7 +107,7 @@ export function ArticleCard({
             }}
             className="ripple-action inline-flex items-center gap-2 rounded-full border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-900"
           >
-            Read here
+            Read briefing
             <span aria-hidden>{"->"}</span>
           </Link>
           <Link
@@ -126,7 +126,7 @@ export function ArticleCard({
             }}
             className="ripple-action inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-semibold text-cyan-700 transition group-hover:gap-3"
           >
-            Open source
+            Open original
             <span aria-hidden>{"->"}</span>
           </Link>
         </div>
